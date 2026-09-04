@@ -1,0 +1,13 @@
+{
+  "content": [
+    {
+      "text": "Promoted evolution strategies:\n- Diagnose bash failures before retrying: When bash fails with EXIT_1, inspect the bounded failure evidence, identify the violated precondition, and change the next attempt instead of repeating the same call.",
+      "type": "text"
+    }
+  ],
+  "source": {
+    "form": "instructions",
+    "kind": "plugin",
+    "plugin": "dsh-evolver"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+lib/
+.cache/
+coverage/
+*.tsbuildinfo
+*.tgz
+.DS_Store
+
+# Local DSH state and test residue.
+.dsh/
+data/
+test-data/

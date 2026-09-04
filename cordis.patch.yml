@@ -1,0 +1,4 @@
+# Optional bundle patch for DSH Web and Headless profiles.
+- insert:
+    - id: dsh-evolver
+      name: dsh-evolver
