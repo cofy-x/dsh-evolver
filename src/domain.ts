@@ -8,6 +8,9 @@ export type ObservationId = Branded<'dsh-evolver.ObservationId'>
 /** Stable identifier for one proposed strategy change. */
 export type ProposalId = Branded<'dsh-evolver.ProposalId'>
 
+/** Stable identifier for one metadata-only tool outcome. */
+export type ToolOutcomeId = Branded<'dsh-evolver.ToolOutcomeId'>
+
 /** Proposal lifecycle states retained for stable read projections. */
 export type ProposalStatus =
   | 'evaluating'
@@ -39,6 +42,40 @@ export interface ToolFailureObservationInput {
   readonly summary: string
 }
 
+/** Metadata-only canonical tool result used for baseline and treatment measurements. */
+export interface ToolOutcome {
+  readonly id: ToolOutcomeId
+  readonly sessionId: string
+  readonly callId: string
+  readonly toolName: string
+  readonly result: 'succeeded' | 'failed'
+  readonly observedAt: string
+}
+
+/** Runtime input for one final DSH tool result. */
+export interface ToolResultObservationInput {
+  readonly sessionId: string
+  readonly callId: string
+  readonly toolName: string
+  readonly failed: boolean
+  readonly errorCode?: string
+  readonly summary?: string
+}
+
+/** Frozen experiment parameters and current deterministic effectiveness projection. */
+export interface EvolutionEvaluation {
+  readonly proposalId: ProposalId
+  readonly targetTool: string
+  readonly windowSize: number
+  readonly minimumSamples: number
+  readonly regressionThreshold: number
+  readonly baseline: { readonly total: number; readonly failed: number }
+  readonly treatment: { readonly total: number; readonly failed: number }
+  readonly verdict: 'insufficient' | 'improved' | 'neutral' | 'regressed'
+  readonly failureRateDelta?: number
+  readonly updatedAt: string
+}
+
 /** Deterministic evidence attached before a proposal can enter human review. */
 export interface VerificationOutcome {
   readonly decision: 'passed' | 'failed'
@@ -56,6 +93,7 @@ export interface EvolutionProposal {
   readonly status: ProposalStatus
   readonly verification?: VerificationOutcome
   readonly rejectionReason?: string
+  readonly supersededReason?: string
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -82,14 +120,38 @@ export type EvolutionAuditEvent = AuditEnvelope &
         readonly proposalId: ProposalId
         readonly reason: string
       }
-    | { readonly kind: 'proposal-promoted'; readonly proposalId: ProposalId }
+    | {
+        readonly kind: 'proposal-promoted'
+        readonly proposalId: ProposalId
+        readonly evaluation?: EvolutionEvaluation
+      }
+    | {
+        readonly kind: 'proposal-superseded'
+        readonly proposalId: ProposalId
+        readonly reason: string
+      }
+    | { readonly kind: 'tool-outcome-recorded'; readonly outcome: ToolOutcome }
+    | {
+        readonly kind: 'strategies-exposed'
+        readonly sessionId: string
+        readonly proposalIds: readonly ProposalId[]
+      }
   )
 
 /** Replayed current state; callers receive detached snapshots. */
 export interface EvolutionState {
   readonly observations: ReadonlyMap<ObservationId, EvolutionObservation>
   readonly proposals: ReadonlyMap<ProposalId, EvolutionProposal>
+  readonly outcomes: ReadonlyMap<ToolOutcomeId, ToolOutcome>
+  readonly evaluations: ReadonlyMap<ProposalId, EvolutionEvaluation>
   readonly lastSeq: number
+}
+
+/** Frozen parameters used when a promotion starts its effectiveness experiment. */
+export interface EvaluationPolicy {
+  readonly windowSize: number
+  readonly minimumSamples: number
+  readonly regressionThreshold: number
 }
 
 /** Verification provider role; providers supply evidence but cannot promote. */
@@ -111,6 +173,9 @@ export interface EvolutionServiceApi {
    */
   observeToolFailure(input: ToolFailureObservationInput): Promise<EvolutionProposal>
 
+  /** Record one canonical result and create a proposal as part of the same commit when it failed. */
+  observeToolResult(input: ToolResultObservationInput): Promise<EvolutionProposal | undefined>
+
   /** @returns proposals, newest first, optionally restricted by status. */
   listProposals(status?: ProposalStatus): readonly EvolutionProposal[]
 
@@ -131,8 +196,17 @@ export interface EvolutionServiceApi {
   /** @param id - accepted proposal. @returns promoted projection. */
   promote(id: ProposalId): Promise<EvolutionProposal>
 
+  /** Stop injecting a promoted strategy while preserving its complete history. */
+  supersede(id: ProposalId, reason: string): Promise<EvolutionProposal>
+
   /** @returns promoted strategies in stable promotion order. */
   listPromoted(): readonly EvolutionProposal[]
+
+  /** Persist which promoted strategies were actually injected into a Session. */
+  recordExposure(sessionId: string, proposalIds: readonly ProposalId[]): Promise<void>
+
+  /** @returns the deterministic baseline/treatment projection when promotion started one. */
+  getEvaluation(id: ProposalId): EvolutionEvaluation | undefined
 
   /** @returns fulfillment after admitted persistence work settles. */
   whenIdle(): Promise<void>
@@ -169,4 +243,12 @@ export function observationId(value: string): ObservationId {
     throw new EvolutionError('observation id must be a lowercase UUIDv4', 'INVALID_INPUT')
   }
   return value as ObservationId
+}
+
+/** Apply compile-time branding after an identifier passed its owning parser. */
+export function toolOutcomeId(value: string): ToolOutcomeId {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)) {
+    throw new EvolutionError('tool outcome id must be a lowercase UUIDv4', 'INVALID_INPUT')
+  }
+  return value as ToolOutcomeId
 }

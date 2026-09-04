@@ -11,7 +11,10 @@ export {
   EvolutionError,
   observationId,
   proposalId,
+  toolOutcomeId,
+  type EvaluationPolicy,
   type EvolutionAuditEvent,
+  type EvolutionEvaluation,
   type EvolutionObservation,
   type EvolutionProposal,
   type EvolutionServiceApi,
@@ -22,8 +25,12 @@ export {
   type ProposalStatus,
   type ToolFailureObservation,
   type ToolFailureObservationInput,
+  type ToolOutcome,
+  type ToolOutcomeId,
+  type ToolResultObservationInput,
   type VerificationOutcome,
 } from './domain.ts'
+export { evaluateEffectiveness } from './evaluation.ts'
 export { DeterministicSafetyVerifier, proposeToolFailureStrategy } from './proposer.ts'
 export { sanitizeEvidence, EvolutionService } from './service.ts'
 export { EvolutionStore } from './store.ts'

@@ -5,6 +5,7 @@ import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import {
   EvolutionError,
   proposalId,
+  type EvolutionEvaluation,
   type EvolutionProposal,
   type EvolutionServiceApi,
   type ProposalStatus,
@@ -34,6 +35,27 @@ function detailOf(proposal: EvolutionProposal): string {
     `Guidance: ${proposal.guidance}`,
     `Verification: ${verification}`,
     ...(proposal.rejectionReason ? [`Rejection: ${proposal.rejectionReason}`] : []),
+    ...(proposal.supersededReason ? [`Rollback: ${proposal.supersededReason}`] : []),
+  ].join('\n')
+}
+
+function rate(failed: number, total: number): string {
+  return total === 0 ? 'n/a' : `${((failed / total) * 100).toFixed(1)}%`
+}
+
+function evaluationOf(evaluation: EvolutionEvaluation): string {
+  const delta =
+    evaluation.failureRateDelta === undefined
+      ? 'n/a'
+      : `${(evaluation.failureRateDelta * 100).toFixed(1)} percentage points`
+  return [
+    `Evaluation ${evaluation.proposalId}`,
+    `Verdict: ${evaluation.verdict}`,
+    `Target tool: ${evaluation.targetTool}`,
+    `Baseline: ${String(evaluation.baseline.failed)}/${String(evaluation.baseline.total)} failed (${rate(evaluation.baseline.failed, evaluation.baseline.total)})`,
+    `Treatment: ${String(evaluation.treatment.failed)}/${String(evaluation.treatment.total)} failed (${rate(evaluation.treatment.failed, evaluation.treatment.total)})`,
+    `Failure-rate delta: ${delta}`,
+    `Policy: minimum ${String(evaluation.minimumSamples)} samples per cohort, ${String(evaluation.windowSize)}-result window, ${(evaluation.regressionThreshold * 100).toFixed(1)}-point threshold`,
   ].join('\n')
 }
 
@@ -63,7 +85,7 @@ async function execute(service: EvolutionServiceApi, rawInput: string): Promise<
   if (idText === undefined) {
     return {
       kind: 'error',
-      text: 'Usage: /evolve list [status] | show|accept|promote <id> | reject <id> <reason>',
+      text: 'Usage: /evolve list [status] | show|accept|promote|evaluate <id> | reject|rollback <id> <reason>',
     }
   }
   try {
@@ -81,6 +103,14 @@ async function execute(service: EvolutionServiceApi, rawInput: string): Promise<
         return { kind: 'success', text: detailOf(await service.reject(id, rest.join(' '))) }
       case 'promote':
         return { kind: 'success', text: detailOf(await service.promote(id)) }
+      case 'evaluate': {
+        const evaluation = service.getEvaluation(id)
+        return evaluation === undefined
+          ? { kind: 'error', text: `Proposal ${id} has no promotion evaluation.` }
+          : { kind: 'success', text: evaluationOf(evaluation) }
+      }
+      case 'rollback':
+        return { kind: 'success', text: detailOf(await service.supersede(id, rest.join(' '))) }
       default:
         return { kind: 'error', text: `Unknown evolve operation: ${String(operation)}` }
     }
@@ -95,7 +125,9 @@ export function registerEvolutionCommand(ctx: Context, service: EvolutionService
   ctx.commands.register({
     name: 'evolve',
     description: 'review and promote audited evolution proposals',
-    input: { hint: '[list [status]|show|accept|promote <id>|reject <id> <reason>]' },
+    input: {
+      hint: '[list [status]|show|accept|promote|evaluate <id>|reject|rollback <id> <reason>]',
+    },
     handler: ({ rawInput }) => execute(service, rawInput),
   })
 }

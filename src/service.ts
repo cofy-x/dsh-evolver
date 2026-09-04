@@ -7,11 +7,15 @@ import type {
   EvolutionProposal,
   EvolutionServiceApi,
   EvolutionVerificationProvider,
+  EvaluationPolicy,
   ObservationId,
   ProposalId,
   ProposalStatus,
   ToolFailureObservation,
   ToolFailureObservationInput,
+  ToolOutcome,
+  ToolOutcomeId,
+  ToolResultObservationInput,
   VerificationOutcome,
 } from './domain.ts'
 import { proposeToolFailureStrategy } from './proposer.ts'
@@ -52,6 +56,11 @@ export class EvolutionService implements EvolutionServiceApi {
     private readonly store: EvolutionStore,
     private readonly verifier: EvolutionVerificationProvider,
     private readonly maxEvidenceChars: number,
+    private readonly evaluationPolicy: EvaluationPolicy = {
+      windowSize: 20,
+      minimumSamples: 5,
+      regressionThreshold: 0.15,
+    },
   ) {}
 
   /** @inheritdoc */
@@ -61,7 +70,55 @@ export class EvolutionService implements EvolutionServiceApi {
   }
 
   private async performObservation(input: ToolFailureObservationInput): Promise<EvolutionProposal> {
+    const { observation, proposal, verification } = await this.createFailurePipeline(input)
+    return this.store.recordPipeline(observation, proposal, verification)
+  }
+
+  /** @inheritdoc */
+  observeToolResult(input: ToolResultObservationInput): Promise<EvolutionProposal | undefined> {
+    this.assertAccepting()
+    return this.track(this.performToolResult(input))
+  }
+
+  private async performToolResult(
+    input: ToolResultObservationInput,
+  ): Promise<EvolutionProposal | undefined> {
     const observedAt = new Date().toISOString()
+    const sessionId = bounded(input.sessionId, 'sessionId', 256)
+    const toolName = safeToken(input.toolName, 'toolName', 128)
+    const outcome: ToolOutcome = Object.freeze({
+      id: brandString<ToolOutcomeId>(randomUUID()),
+      sessionId,
+      callId: safeToken(input.callId, 'callId', 256),
+      toolName,
+      result: input.failed ? 'failed' : 'succeeded',
+      observedAt,
+    })
+    if (!input.failed) return this.store.recordToolResultPipeline(outcome, this.evaluationPolicy)
+    const { observation, proposal, verification } = await this.createFailurePipeline(
+      {
+        sessionId,
+        toolName,
+        errorCode: input.errorCode ?? 'TOOL_FAILURE',
+        summary: input.summary ?? 'Tool failed without a bounded summary.',
+      },
+      observedAt,
+    )
+    return this.store.recordToolResultPipeline(outcome, this.evaluationPolicy, {
+      observation,
+      proposal,
+      verification,
+    })
+  }
+
+  private async createFailurePipeline(
+    input: ToolFailureObservationInput,
+    observedAt = new Date().toISOString(),
+  ): Promise<{
+    readonly observation: ToolFailureObservation
+    readonly proposal: EvolutionProposal
+    readonly verification: VerificationOutcome
+  }> {
     const observation: ToolFailureObservation = Object.freeze({
       id: brandString<ObservationId>(randomUUID()),
       kind: 'tool-failure',
@@ -74,8 +131,8 @@ export class EvolutionService implements EvolutionServiceApi {
     const proposal = Object.freeze(
       proposeToolFailureStrategy(brandString<ProposalId>(randomUUID()), observation, observedAt),
     )
-    const outcome = this.normalizeVerification(await this.verifier.verify(proposal))
-    return this.store.recordPipeline(observation, proposal, outcome)
+    const verification = this.normalizeVerification(await this.verifier.verify(proposal))
+    return { observation, proposal, verification }
   }
 
   /** @inheritdoc */
@@ -108,7 +165,15 @@ export class EvolutionService implements EvolutionServiceApi {
   /** @inheritdoc */
   promote(id: ProposalId): Promise<EvolutionProposal> {
     this.assertAccepting()
-    return this.track(this.store.promote(id))
+    return this.track(this.store.promote(id, this.evaluationPolicy))
+  }
+
+  /** @inheritdoc */
+  supersede(id: ProposalId, reason: string): Promise<EvolutionProposal> {
+    this.assertAccepting()
+    return this.track(
+      this.store.supersede(id, bounded(reason, 'supersede reason', this.maxEvidenceChars)),
+    )
   }
 
   /** @inheritdoc */
@@ -118,6 +183,18 @@ export class EvolutionService implements EvolutionServiceApi {
         .filter((proposal) => proposal.status === 'promoted')
         .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt)),
     )
+  }
+
+  /** @inheritdoc */
+  recordExposure(sessionId: string, proposalIds: readonly ProposalId[]): Promise<void> {
+    this.assertAccepting()
+    if (proposalIds.length === 0) return Promise.resolve()
+    return this.track(this.store.recordExposure(bounded(sessionId, 'sessionId', 256), proposalIds))
+  }
+
+  /** @inheritdoc */
+  getEvaluation(id: ProposalId) {
+    return this.store.snapshot().evaluations.get(id)
   }
 
   /** @inheritdoc */

@@ -30,7 +30,12 @@ async function mount(): Promise<{
   contexts.push(ctx)
   await ctx.plugin(SessionStore)
   await ctx.plugin(CommandRuntime)
-  const fiber = await ctx.plugin(EvolverPlugin, { dataDir: root })
+  const fiber = await ctx.plugin(EvolverPlugin, {
+    dataDir: root,
+    evaluationWindowSize: 2,
+    minimumEvaluationSamples: 1,
+    regressionThreshold: 0.5,
+  })
   const session = ctx.sessions.create(SessionId('evolver-test-session'))
   const injected: UserMessage[] = []
   const agent = {
@@ -68,6 +73,24 @@ function failedExecution(agent: Agent): {
   }
 }
 
+function successfulExecution(agent: Agent): {
+  exec: ToolExecution
+  result: ToolExecutionResult
+} {
+  return {
+    exec: {
+      callId: 'call-2',
+      rootCallId: 'call-2',
+      token: Symbol('tool'),
+      name: 'bash',
+      arguments: { command: 'ignored' },
+      agent,
+      signal: new AbortController().signal,
+    } as unknown as ToolExecution,
+    result: { isError: false, value: null, content: [{ type: 'text', text: 'ignored' }] },
+  }
+}
+
 describe('dsh-evolver plugin', () => {
   it('collects a failed tool, exposes human review, and injects only promoted guidance', async () => {
     const { ctx, agent, injected } = await mount()
@@ -101,6 +124,28 @@ describe('dsh-evolver plugin', () => {
       await readFile(new URL('./snapshots/promoted-context.json', import.meta.url), 'utf8'),
     ) as unknown
     expect({ content: injected[0]?.content, source: injected[0]?.source }).toEqual(expected)
+
+    const success = successfulExecution(agent)
+    ctx.emit('tools/result', success.exec, success.result)
+    await ctx.evolver.whenIdle()
+    const evaluated = await ctx.commands.execute(
+      agent,
+      `/evolve evaluate ${proposal.id}`,
+      [],
+      new AbortController().signal,
+    )
+    expect(evaluated?.result).toMatchObject({ kind: 'success' })
+    expect(evaluated?.result.text).toContain('Verdict: improved')
+
+    const rolledBack = await ctx.commands.execute(
+      agent,
+      `/evolve rollback ${proposal.id} operator-observed-regression`,
+      [],
+      new AbortController().signal,
+    )
+    expect(rolledBack?.result.text).toContain('Status: superseded')
+    agentEvents(ctx, agent).emit('agent/session-start', { source: 'resume' })
+    expect(injected).toHaveLength(1)
   })
 
   it('removes command and event registrations and drains writes on disposal', async () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -68,11 +68,38 @@ describe('EvolutionStore', () => {
   it('rejects corrupt audit input instead of partially recovering it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-evolver-corrupt-'))
     roots.push(root)
-    await import('node:fs/promises').then(({ writeFile }) =>
-      writeFile(join(root, 'audit-v1.jsonl'), '{"schemaVersion":1,"seq":4}\n'),
-    )
+    await writeFile(join(root, 'audit-v1.jsonl'), '{"schemaVersion":1,"seq":4}\n')
     await expect(EvolutionStore.open(root)).rejects.toMatchObject({
       code: 'CORRUPT_STORE',
+    })
+  })
+
+  it('replays promotion facts written before evaluation metadata was introduced', async () => {
+    const { root, service } = await createService()
+    const proposal = await service.observeToolFailure({
+      sessionId: 'legacy-session',
+      toolName: 'bash',
+      errorCode: 'EXIT_1',
+      summary: 'legacy failure',
+    })
+    await service.accept(proposal.id)
+    await service.promote(proposal.id)
+    const filename = join(root, 'audit-v1.jsonl')
+    const legacyEvents = (await readFile(filename, 'utf8'))
+      .trimEnd()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .map((event) => {
+        const legacyEvent = { ...event }
+        Reflect.deleteProperty(legacyEvent, 'evaluation')
+        return legacyEvent
+      })
+    await writeFile(filename, `${legacyEvents.map((event) => JSON.stringify(event)).join('\n')}\n`)
+
+    const reopened = await EvolutionStore.open(root)
+    expect(reopened.snapshot().evaluations.get(proposal.id)).toMatchObject({
+      verdict: 'insufficient',
+      baseline: { total: 0, failed: 0 },
     })
   })
 

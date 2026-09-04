@@ -27,27 +27,46 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     store,
     new DeterministicSafetyVerifier(),
     resolved.maxEvidenceChars,
+    {
+      windowSize: resolved.evaluationWindowSize,
+      minimumSamples: resolved.minimumEvaluationSamples,
+      regressionThreshold: resolved.regressionThreshold,
+    },
   )
   ctx.provide('evolver', service)
   registerEvolutionCommand(ctx, service)
 
   ctx.on('tools/result', (exec, result) => {
-    if (!result.isError || exec.agent === undefined) return
+    if (exec.agent === undefined) return
     void service
-      .observeToolFailure({
+      .observeToolResult({
         sessionId: String(exec.agent.session.id),
+        callId: exec.callId,
         toolName: exec.name,
-        errorCode: result.error.info?.code ?? 'TOOL_FAILURE',
-        summary: result.error.message,
+        failed: result.isError,
+        ...(result.isError
+          ? {
+              errorCode: result.error.info?.code ?? 'TOOL_FAILURE',
+              summary: result.error.message,
+            }
+          : {}),
       })
       .catch((error: unknown) => {
-        ctx.logger.warn(`dsh-evolver failed to persist a tool observation: ${String(error)}`)
+        ctx.logger.warn(`dsh-evolver failed to persist a tool result: ${String(error)}`)
       })
   })
 
   ctx.on('agent/session-start', ({ agent }) => {
     const promoted = service.listPromoted().slice(-resolved.maxPromotedStrategies)
     if (promoted.length === 0) return
+    void service
+      .recordExposure(
+        String(agent.session.id),
+        promoted.map((proposal) => proposal.id),
+      )
+      .catch((error: unknown) => {
+        ctx.logger.warn(`dsh-evolver failed to persist a strategy exposure: ${String(error)}`)
+      })
     const text = [
       'Promoted evolution strategies:',
       ...promoted.map((proposal) => `- ${proposal.title}: ${proposal.guidance}`),
