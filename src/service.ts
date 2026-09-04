@@ -8,7 +8,12 @@ import type {
   EvolutionServiceApi,
   EvolutionVerificationProvider,
   EvaluationPolicy,
+  FailurePattern,
+  FailurePatternDetail,
+  FailurePatternId,
+  GenerationReservationId,
   ObservationId,
+  ProposalAdmissionPolicy,
   ProposalId,
   ProposalStatus,
   ToolFailureObservation,
@@ -19,7 +24,8 @@ import type {
   VerificationOutcome,
 } from './domain.ts'
 import { proposeToolFailureStrategy } from './proposer.ts'
-import type { EvolutionStore } from './store.ts'
+import { deriveFailurePatternSignature } from './pattern.ts'
+import type { EvolutionStore, FailureAdmissionResult } from './store.ts'
 
 function bounded(value: string, field: string, maxChars: number): string {
   const normalized = value.replace(/\s+/gu, ' ').trim()
@@ -61,17 +67,23 @@ export class EvolutionService implements EvolutionServiceApi {
       minimumSamples: 5,
       regressionThreshold: 0.15,
     },
+    private readonly admissionPolicy: ProposalAdmissionPolicy = {
+      reproposalAfterOccurrences: 5,
+      generationReservationTimeoutMs: 300_000,
+    },
   ) {}
 
   /** @inheritdoc */
-  observeToolFailure(input: ToolFailureObservationInput): Promise<EvolutionProposal> {
+  observeToolFailure(input: ToolFailureObservationInput): Promise<EvolutionProposal | undefined> {
     this.assertAccepting()
     return this.track(this.performObservation(input))
   }
 
-  private async performObservation(input: ToolFailureObservationInput): Promise<EvolutionProposal> {
-    const { observation, proposal, verification } = await this.createFailurePipeline(input)
-    return this.store.recordPipeline(observation, proposal, verification)
+  private async performObservation(
+    input: ToolFailureObservationInput,
+  ): Promise<EvolutionProposal | undefined> {
+    const observation = this.createFailureObservation(input)
+    return this.admitAndGenerate(undefined, observation)
   }
 
   /** @inheritdoc */
@@ -95,7 +107,7 @@ export class EvolutionService implements EvolutionServiceApi {
       observedAt,
     })
     if (!input.failed) return this.store.recordToolResultPipeline(outcome, this.evaluationPolicy)
-    const { observation, proposal, verification } = await this.createFailurePipeline(
+    const observation = this.createFailureObservation(
       {
         sessionId,
         toolName,
@@ -104,22 +116,14 @@ export class EvolutionService implements EvolutionServiceApi {
       },
       observedAt,
     )
-    return this.store.recordToolResultPipeline(outcome, this.evaluationPolicy, {
-      observation,
-      proposal,
-      verification,
-    })
+    return this.admitAndGenerate(outcome, observation)
   }
 
-  private async createFailurePipeline(
+  private createFailureObservation(
     input: ToolFailureObservationInput,
     observedAt = new Date().toISOString(),
-  ): Promise<{
-    readonly observation: ToolFailureObservation
-    readonly proposal: EvolutionProposal
-    readonly verification: VerificationOutcome
-  }> {
-    const observation: ToolFailureObservation = Object.freeze({
+  ): ToolFailureObservation {
+    return Object.freeze({
       id: brandString<ObservationId>(randomUUID()),
       kind: 'tool-failure',
       sessionId: bounded(input.sessionId, 'sessionId', 256),
@@ -128,11 +132,63 @@ export class EvolutionService implements EvolutionServiceApi {
       summary: sanitizeEvidence(input.summary, this.maxEvidenceChars),
       observedAt,
     })
-    const proposal = Object.freeze(
-      proposeToolFailureStrategy(brandString<ProposalId>(randomUUID()), observation, observedAt),
+  }
+
+  private async admitAndGenerate(
+    outcome: ToolOutcome | undefined,
+    observation: ToolFailureObservation,
+  ): Promise<EvolutionProposal | undefined> {
+    const signature = deriveFailurePatternSignature(
+      observation.toolName,
+      observation.errorCode,
+      observation.summary,
     )
-    const verification = this.normalizeVerification(await this.verifier.verify(proposal))
-    return { observation, proposal, verification }
+    const admission = await this.store.admitFailure(
+      outcome,
+      observation,
+      signature,
+      {
+        reservationId: brandString<GenerationReservationId>(randomUUID()),
+        proposalId: brandString<ProposalId>(randomUUID()),
+      },
+      this.admissionPolicy,
+    )
+    if (admission?.reservation === undefined) return undefined
+    return this.finishGeneration({ ...admission, reservation: admission.reservation }, observation)
+  }
+
+  private async finishGeneration(
+    admission: FailureAdmissionResult & {
+      readonly reservation: NonNullable<FailureAdmissionResult['reservation']>
+    },
+    observation: ToolFailureObservation,
+  ): Promise<EvolutionProposal> {
+    const { reservation } = admission
+    try {
+      const proposal = Object.freeze(
+        proposeToolFailureStrategy(reservation.proposalId, observation, reservation.reservedAt, {
+          pattern: admission.pattern,
+          generation: reservation.generation,
+          occurrence: reservation.occurrence,
+          ...(admission.priorTerminalStatus
+            ? { priorTerminalStatus: admission.priorTerminalStatus }
+            : {}),
+        }),
+      )
+      const verification = this.normalizeVerification(await this.verifier.verify(proposal))
+      return await this.store.finalizeReservation(reservation.id, proposal, verification)
+    } catch (error: unknown) {
+      try {
+        await this.store.abandonReservation(reservation.id, 'provider-failed')
+      } catch (abandonError: unknown) {
+        throw new AggregateError(
+          [error, abandonError],
+          'proposal generation failed and its reservation could not be released',
+          { cause: abandonError },
+        )
+      }
+      throw error
+    }
   }
 
   /** @inheritdoc */
@@ -146,6 +202,47 @@ export class EvolutionService implements EvolutionServiceApi {
   /** @inheritdoc */
   getProposal(id: ProposalId): EvolutionProposal | undefined {
     return this.store.snapshot().proposals.get(id)
+  }
+
+  /** @inheritdoc */
+  listPatterns(): readonly FailurePattern[] {
+    return Object.freeze(
+      [...this.store.snapshot().patterns.values()].sort((left, right) =>
+        right.lastSeenAt.localeCompare(left.lastSeenAt),
+      ),
+    )
+  }
+
+  /** @inheritdoc */
+  getPattern(id: FailurePatternId): FailurePattern | undefined {
+    return this.store.snapshot().patterns.get(id)
+  }
+
+  /** @inheritdoc */
+  getPatternDetail(id: FailurePatternId): FailurePatternDetail | undefined {
+    const state = this.store.snapshot()
+    const pattern = state.patterns.get(id)
+    if (pattern === undefined) return undefined
+    const latestProposal =
+      pattern.latestProposalId === undefined
+        ? undefined
+        : state.proposals.get(pattern.latestProposalId)
+    const activeProposal =
+      pattern.activeProposalId === undefined
+        ? undefined
+        : state.proposals.get(pattern.activeProposalId)
+    const reservation = state.reservations.get(pattern.id)
+    const nextProposalEligibleAtOccurrence =
+      pattern.latestProposalOccurrence === undefined
+        ? pattern.occurrenceCount
+        : pattern.latestProposalOccurrence + this.admissionPolicy.reproposalAfterOccurrences
+    return Object.freeze({
+      pattern,
+      ...(latestProposal ? { latestProposal } : {}),
+      ...(activeProposal ? { activeProposal } : {}),
+      ...(reservation ? { reservation } : {}),
+      nextProposalEligibleAtOccurrence,
+    })
   }
 
   /** @inheritdoc */

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { DeterministicSafetyVerifier } from '../src/proposer.ts'
 import { sanitizeEvidence, EvolutionService } from '../src/service.ts'
 import { EvolutionStore } from '../src/store.ts'
-import type { EvolutionVerificationProvider } from '../src/domain.ts'
+import type { EvolutionProposal, EvolutionVerificationProvider } from '../src/domain.ts'
 
 const roots: string[] = []
 
@@ -20,15 +20,22 @@ async function createService(): Promise<{ root: string; service: EvolutionServic
   return { root, service: new EvolutionService(store, new DeterministicSafetyVerifier(), 120) }
 }
 
+function requireProposal(proposal: EvolutionProposal | undefined): EvolutionProposal {
+  if (proposal === undefined) throw new Error('expected an admitted proposal')
+  return proposal
+}
+
 describe('EvolutionStore', () => {
   it('persists a verified proposal and recovers promoted state after restart', async () => {
     const { root, service } = await createService()
-    const proposal = await service.observeToolFailure({
-      sessionId: 'session-1',
-      toolName: 'bash',
-      errorCode: 'EXIT_1',
-      summary: 'tests failed',
-    })
+    const proposal = requireProposal(
+      await service.observeToolFailure({
+        sessionId: 'session-1',
+        toolName: 'bash',
+        errorCode: 'EXIT_1',
+        summary: 'tests failed',
+      }),
+    )
     expect(proposal.status).toBe('pending')
     expect(proposal.verification?.decision).toBe('passed')
 
@@ -43,21 +50,27 @@ describe('EvolutionStore', () => {
       120,
     )
     expect(reopened.listPromoted()).toMatchObject([
-      { id: proposal.id, status: 'promoted', title: 'Diagnose bash failures before retrying' },
+      {
+        id: proposal.id,
+        status: 'promoted',
+        title: 'Diagnose recurring bash failures before retrying',
+      },
     ])
     expect((await readFile(join(root, 'audit-v1.jsonl'), 'utf8')).trim().split('\n')).toHaveLength(
-      5,
+      8,
     )
   })
 
   it('persists rejection idempotently and forbids later promotion', async () => {
     const { service } = await createService()
-    const proposal = await service.observeToolFailure({
-      sessionId: 'session-2',
-      toolName: 'read_file',
-      errorCode: 'NOT_FOUND',
-      summary: 'missing input',
-    })
+    const proposal = requireProposal(
+      await service.observeToolFailure({
+        sessionId: 'session-2',
+        toolName: 'read_file',
+        errorCode: 'NOT_FOUND',
+        summary: 'missing input',
+      }),
+    )
     expect((await service.reject(proposal.id, 'not broadly reusable')).status).toBe('rejected')
     expect((await service.reject(proposal.id, 'not broadly reusable')).status).toBe('rejected')
     await expect(service.promote(proposal.id)).rejects.toMatchObject({
@@ -74,14 +87,16 @@ describe('EvolutionStore', () => {
     })
   })
 
-  it('replays promotion facts written before evaluation metadata was introduced', async () => {
+  it('replays first-version logs without pattern or evaluation facts', async () => {
     const { root, service } = await createService()
-    const proposal = await service.observeToolFailure({
-      sessionId: 'legacy-session',
-      toolName: 'bash',
-      errorCode: 'EXIT_1',
-      summary: 'legacy failure',
-    })
+    const proposal = requireProposal(
+      await service.observeToolFailure({
+        sessionId: 'legacy-session',
+        toolName: 'bash',
+        errorCode: 'EXIT_1',
+        summary: 'legacy failure',
+      }),
+    )
     await service.accept(proposal.id)
     await service.promote(proposal.id)
     const filename = join(root, 'audit-v1.jsonl')
@@ -89,11 +104,28 @@ describe('EvolutionStore', () => {
       .trimEnd()
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter(
+        (event) =>
+          ![
+            'failure-pattern-created',
+            'failure-pattern-occurred',
+            'proposal-generation-reserved',
+            'proposal-generation-abandoned',
+          ].includes(String(event.kind)),
+      )
       .map((event) => {
         const legacyEvent = { ...event }
         Reflect.deleteProperty(legacyEvent, 'evaluation')
+        if (legacyEvent.kind === 'proposal-created') {
+          const proposal = { ...(legacyEvent.proposal as Record<string, unknown>) }
+          Reflect.deleteProperty(proposal, 'patternId')
+          Reflect.deleteProperty(proposal, 'patternOccurrence')
+          Reflect.deleteProperty(proposal, 'generation')
+          legacyEvent.proposal = proposal
+        }
         return legacyEvent
       })
+      .map((event, seq) => ({ ...event, seq }))
     await writeFile(filename, `${legacyEvents.map((event) => JSON.stringify(event)).join('\n')}\n`)
 
     const reopened = await EvolutionStore.open(root)
@@ -101,6 +133,7 @@ describe('EvolutionStore', () => {
       verdict: 'insufficient',
       baseline: { total: 0, failed: 0 },
     })
+    expect(reopened.snapshot().patterns.size).toBe(0)
   })
 
   it('normalizes verifier evidence before it reaches the durable audit', async () => {
@@ -110,12 +143,14 @@ describe('EvolutionStore', () => {
       verify: () => ({ decision: 'passed', verifier: 'review-v1', evidence: 'x'.repeat(200) }),
     }
     const service = new EvolutionService(await EvolutionStore.open(root), verifier, 64)
-    const proposal = await service.observeToolFailure({
-      sessionId: 'session-3',
-      toolName: 'read_file',
-      errorCode: 'NOT_FOUND',
-      summary: 'missing input',
-    })
+    const proposal = requireProposal(
+      await service.observeToolFailure({
+        sessionId: 'session-3',
+        toolName: 'read_file',
+        errorCode: 'NOT_FOUND',
+        summary: 'missing input',
+      }),
+    )
 
     expect(proposal.verification?.evidence).toHaveLength(64)
     expect(proposal.verification?.evidence.endsWith('…')).toBe(true)

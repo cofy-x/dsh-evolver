@@ -11,6 +11,15 @@ export type ProposalId = Branded<'dsh-evolver.ProposalId'>
 /** Stable identifier for one metadata-only tool outcome. */
 export type ToolOutcomeId = Branded<'dsh-evolver.ToolOutcomeId'>
 
+/** Deterministic identifier for one versioned exact failure pattern. */
+export type FailurePatternId = Branded<'dsh-evolver.FailurePatternId'>
+
+/** Opaque identity for one recoverable proposal-generation reservation. */
+export type GenerationReservationId = Branded<'dsh-evolver.GenerationReservationId'>
+
+/** Pattern-key algorithm recorded with every durable pattern. */
+export type FailurePatternKeyVersion = 'failure-pattern-v1'
+
 /** Proposal lifecycle states retained for stable read projections. */
 export type ProposalStatus =
   | 'evaluating'
@@ -62,6 +71,44 @@ export interface ToolResultObservationInput {
   readonly summary?: string
 }
 
+/** Aggregated projection over independently persisted failure observations. */
+export interface FailurePattern {
+  readonly id: FailurePatternId
+  readonly keyVersion: FailurePatternKeyVersion
+  readonly toolName: string
+  readonly errorCode: string
+  readonly canonicalSummary: string
+  readonly occurrenceCount: number
+  readonly firstSeenAt: string
+  readonly lastSeenAt: string
+  readonly representativeObservationIds: readonly ObservationId[]
+  readonly latestProposalId?: ProposalId
+  readonly latestProposalOccurrence?: number
+  readonly latestGeneration: number
+  readonly activeProposalId?: ProposalId
+}
+
+/** Structured review projection combining a pattern with current admission state. */
+export interface FailurePatternDetail {
+  readonly pattern: FailurePattern
+  readonly latestProposal?: EvolutionProposal
+  readonly activeProposal?: EvolutionProposal
+  readonly reservation?: ProposalGenerationReservation
+  readonly nextProposalEligibleAtOccurrence?: number
+}
+
+/** Persisted lease proving which process may invoke a proposal provider for a generation. */
+export interface ProposalGenerationReservation {
+  readonly id: GenerationReservationId
+  readonly patternId: FailurePatternId
+  readonly proposalId: ProposalId
+  readonly observationId: ObservationId
+  readonly generation: number
+  readonly occurrence: number
+  readonly reservedAt: string
+  readonly expiresAt: string
+}
+
 /** Frozen experiment parameters and current deterministic effectiveness projection. */
 export interface EvolutionEvaluation {
   readonly proposalId: ProposalId
@@ -87,6 +134,9 @@ export interface VerificationOutcome {
 export interface EvolutionProposal {
   readonly id: ProposalId
   readonly observationId: ObservationId
+  readonly patternId?: FailurePatternId
+  readonly patternOccurrence?: number
+  readonly generation?: number
   readonly kind: 'strategy-guidance'
   readonly title: string
   readonly guidance: string
@@ -108,6 +158,28 @@ interface AuditEnvelope {
 export type EvolutionAuditEvent = AuditEnvelope &
   (
     | { readonly kind: 'observation-recorded'; readonly observation: EvolutionObservation }
+    | {
+        readonly kind: 'failure-pattern-created'
+        readonly pattern: Pick<
+          FailurePattern,
+          'id' | 'keyVersion' | 'toolName' | 'errorCode' | 'canonicalSummary' | 'firstSeenAt'
+        >
+      }
+    | {
+        readonly kind: 'failure-pattern-occurred'
+        readonly patternId: FailurePatternId
+        readonly observationId: ObservationId
+        readonly occurrence: number
+      }
+    | {
+        readonly kind: 'proposal-generation-reserved'
+        readonly reservation: ProposalGenerationReservation
+      }
+    | {
+        readonly kind: 'proposal-generation-abandoned'
+        readonly reservationId: GenerationReservationId
+        readonly reason: 'provider-failed' | 'expired'
+      }
     | { readonly kind: 'proposal-created'; readonly proposal: EvolutionProposal }
     | {
         readonly kind: 'verification-recorded'
@@ -142,6 +214,8 @@ export type EvolutionAuditEvent = AuditEnvelope &
 export interface EvolutionState {
   readonly observations: ReadonlyMap<ObservationId, EvolutionObservation>
   readonly proposals: ReadonlyMap<ProposalId, EvolutionProposal>
+  readonly patterns: ReadonlyMap<FailurePatternId, FailurePattern>
+  readonly reservations: ReadonlyMap<FailurePatternId, ProposalGenerationReservation>
   readonly outcomes: ReadonlyMap<ToolOutcomeId, ToolOutcome>
   readonly evaluations: ReadonlyMap<ProposalId, EvolutionEvaluation>
   readonly lastSeq: number
@@ -152,6 +226,12 @@ export interface EvaluationPolicy {
   readonly windowSize: number
   readonly minimumSamples: number
   readonly regressionThreshold: number
+}
+
+/** Admission and crash-recovery parameters frozen by the service. */
+export interface ProposalAdmissionPolicy {
+  readonly reproposalAfterOccurrences: number
+  readonly generationReservationTimeoutMs: number
 }
 
 /** Verification provider role; providers supply evidence but cannot promote. */
@@ -167,11 +247,11 @@ export interface EvolutionVerificationProvider {
 /** Public service exposed as `ctx.evolver`. */
 export interface EvolutionServiceApi {
   /**
-   * Persist one bounded tool failure and create its verified pending proposal.
+   * Persist one bounded tool failure and create a verified proposal only when admission succeeds.
    * @param input - normalized observation with no transcript or tool payload.
-   * @returns the persisted proposal projection.
+   * @returns the persisted proposal, or undefined for an aggregated-only occurrence.
    */
-  observeToolFailure(input: ToolFailureObservationInput): Promise<EvolutionProposal>
+  observeToolFailure(input: ToolFailureObservationInput): Promise<EvolutionProposal | undefined>
 
   /** Record one canonical result and create a proposal as part of the same commit when it failed. */
   observeToolResult(input: ToolResultObservationInput): Promise<EvolutionProposal | undefined>
@@ -181,6 +261,15 @@ export interface EvolutionServiceApi {
 
   /** @param id - proposal identifier. @returns the proposal when present. */
   getProposal(id: ProposalId): EvolutionProposal | undefined
+
+  /** @returns patterns ordered by latest occurrence, newest first. */
+  listPatterns(): readonly FailurePattern[]
+
+  /** @returns one exact pattern projection when present. */
+  getPattern(id: FailurePatternId): FailurePattern | undefined
+
+  /** @returns structured pattern, proposal, reservation, and reproposal eligibility state. */
+  getPatternDetail(id: FailurePatternId): FailurePatternDetail | undefined
 
   /** @param id - verified pending proposal. @returns accepted projection. */
   accept(id: ProposalId): Promise<EvolutionProposal>
@@ -251,4 +340,26 @@ export function toolOutcomeId(value: string): ToolOutcomeId {
     throw new EvolutionError('tool outcome id must be a lowercase UUIDv4', 'INVALID_INPUT')
   }
   return value as ToolOutcomeId
+}
+
+/** Parse one deterministic v1 failure-pattern identifier. */
+export function failurePatternId(value: string): FailurePatternId {
+  if (!/^fp1_[0-9a-f]{64}$/u.test(value)) {
+    throw new EvolutionError(
+      'failure pattern id must be fp1_ followed by 64 lowercase hex digits',
+      'INVALID_INPUT',
+    )
+  }
+  return value as FailurePatternId
+}
+
+/** Parse one reservation identifier at the persistence boundary. */
+export function generationReservationId(value: string): GenerationReservationId {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)) {
+    throw new EvolutionError(
+      'generation reservation id must be a lowercase UUIDv4',
+      'INVALID_INPUT',
+    )
+  }
+  return value as GenerationReservationId
 }

@@ -11,6 +11,8 @@ DSH Evolver turns bounded facts from agent execution into reusable strategy guid
 ```text
 DSH events
   -> observations
+  -> exact failure patterns
+  -> proposal admission
   -> proposal
   -> verification
   -> human review
@@ -32,6 +34,8 @@ After a model-requested tool fails, inspect and review the generated proposal th
 
 ```text
 /evolve list
+/evolve patterns
+/evolve pattern <pattern-id>
 /evolve show <proposal-id>
 /evolve accept <proposal-id>
 /evolve promote <proposal-id>
@@ -42,11 +46,15 @@ A rejected candidate uses `/evolve reject <proposal-id> <reason>`. Promotion is 
 
 ## Architecture
 
-The MVP is one TypeScript function plugin with a complete capability seam: `ctx.evolver` is the service, a deterministic offline provider creates and safety-checks bounded strategy candidates, and DSH event/command adapters are the consumers. It listens to the immutable `tools/result` event, persists metadata-only outcomes while a relevant experiment window is collecting, and atomically records each failed result with its redacted observation, proposal, and verification facts in `$DSH_HOME/evolver/audit-v1.jsonl`.
+The MVP is one TypeScript function plugin with a complete capability seam: `ctx.evolver` is the service, a deterministic offline provider creates and safety-checks bounded strategy candidates, and DSH event/command adapters are the consumers. It listens to the immutable `tools/result` event, persists metadata-only outcomes while a relevant experiment window is collecting, and atomically records each failed result with its redacted observation and exact failure-pattern occurrence in `$DSH_HOME/evolver/audit-v1.jsonl`.
+
+Equivalent sanitized failures are grouped by a versioned SHA-256 signature over the validated tool name, error code, and canonical summary. Instance-only UUIDs, long hexadecimal values, numeric IDs, URLs, user-home prefixes, credential placeholders, case, and whitespace are normalized. This is intentionally deterministic exact matching, not semantic clustering. The first occurrence reserves generation 1; while a proposal is evaluating, pending, accepted, or promoted, repeats only increment the pattern. After rejection or rollback, the default policy admits the next generation on the fifth new occurrence (generation 2 at occurrence 6). This reduces verifier and future LLM-provider cost while preserving every occurrence as audit evidence.
+
+An observation is the bounded, independently audited fact from one failed call. A pattern is the replayed aggregate over observations with the same exact signature. A proposal is one reviewable strategy generation triggered by an admitted pattern occurrence; it never replaces either evidence layer. Embeddings and LLM classification are intentionally deferred because their nondeterminism, external-data exposure, cost, and threshold tuning would weaken replayability before there is evidence that exact matching is insufficient.
 
 Promotion freezes a bounded historical baseline for the proposal's target tool. Only results from Sessions where that strategy was actually injected count as treatment. The deterministic evaluation reports `insufficient`, `improved`, `neutral`, or `regressed` from configurable sample and failure-rate thresholds. This is an operational heuristic, not a causal or statistical-significance claim, so rollback remains an explicit human action.
 
-The JSONL audit stream is versioned and replayed at startup. Writes use a cross-process lock and atomic whole-file replacement with owner-only permissions. The service exposes stable read projections for future Console, Trajectory, verifier, and automation adapters. See [the architecture guide](docs/architecture.md).
+Admission uses a durable reservation: occurrence recording and generation ownership are decided under the same cross-process lock, provider work runs outside the lock, and finalization rechecks ownership under lock. Provider failure releases the reservation; a crashed or timed-out owner is reclaimed by the next matching occurrence after the configured expiry. The JSONL audit stream is versioned and replayed at startup. Writes use atomic whole-file replacement with owner-only permissions. The service exposes stable read projections for future Console, Trajectory, verifier, and automation adapters. See [the architecture guide](docs/architecture.md).
 
 ## Safety model
 
@@ -70,7 +78,7 @@ pnpm install --frozen-lockfile
 pnpm run build
 ```
 
-The included `cordis.patch.yml` inserts one optional `dsh-evolver` row into a selected Web or Headless profile. Configuration supports `dataDir`, `maxEvidenceChars`, `maxPromotedStrategies`, `evaluationWindowSize` (default 20), `minimumEvaluationSamples` (default 5), and `regressionThreshold` (default 0.15); invalid or unsafe bounds fail plugin loading.
+The included `cordis.patch.yml` inserts one optional `dsh-evolver` row into a selected Web or Headless profile. Configuration supports `dataDir`, `maxEvidenceChars`, `maxPromotedStrategies`, `evaluationWindowSize` (default 20), `minimumEvaluationSamples` (default 5), `regressionThreshold` (default 0.15), `reproposalAfterOccurrences` (default 5, maximum 1000), and `generationReservationTimeoutMs` (default 300000, maximum 86400000); invalid or unsafe bounds fail plugin loading.
 
 ## Data and privacy
 
@@ -87,7 +95,7 @@ pnpm run build
 pnpm pack --dry-run
 ```
 
-The keyless suite covers persistence restart and legacy-log replay, corruption rejection, state-transition idempotency, redaction, outcome deduplication, baseline/treatment isolation, effectiveness verdicts, rollback, Cordis disposal, model-visible promoted-context snapshots, and Web/Headless composition through the real Cordis Loader.
+The keyless suite covers signature canonicalization and field boundaries, concurrent admission, generation thresholds, reservation expiry and provider failure, persistence restart and legacy-log replay, corruption rejection, state-transition idempotency, redaction, outcome deduplication, generation-isolated baseline/treatment evaluation, effectiveness verdicts, rollback, Cordis disposal, model-visible promoted-context snapshots, and Web/Headless composition through the real Cordis Loader.
 
 ## Prior Art and Acknowledgements
 
@@ -95,7 +103,7 @@ The keyless suite covers persistence restart and legacy-log replay, corruption r
 
 ## Known Limitations and Deferred Work
 
-The MVP proposes only from failed top-level or nested DSH tool results associated with an Agent. Its effectiveness comparison is a bounded before/after heuristic: it does not randomize assignment, control for workload changes, claim statistical significance, or inspect semantic task success. It uses one deterministic proposal template and an offline structural safety verifier; it does not yet call `dsh-as-a-verifier`, replay Sessions, compare snapshots, materialize skills, schedule `dsh-automation` Runs, expose a dedicated UI projection, deduplicate equivalent failures, compact long audit streams, share assets, or evolve source code. Promoted guidance is applied at Session start, so promotion does not retroactively change an already-started Agent.
+The MVP proposes only from failed top-level or nested DSH tool results associated with an Agent. Its effectiveness comparison is a bounded before/after heuristic: it does not randomize assignment, control for workload changes, claim statistical significance, or inspect semantic task success. Pattern matching is versioned and exact after canonicalization; it does not perform semantic similarity, and pre-upgrade proposals remain valid but are not retroactively attached to new patterns. It uses one deterministic proposal template and an offline structural safety verifier; it does not yet call `dsh-as-a-verifier`, replay Sessions, compare snapshots, materialize skills, schedule `dsh-automation` Runs, expose a dedicated UI projection, compact long audit streams, share assets, or evolve source code. Promoted guidance is applied at Session start, so promotion does not retroactively change an already-started Agent.
 
 ## License
 

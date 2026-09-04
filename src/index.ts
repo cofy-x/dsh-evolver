@@ -9,6 +9,8 @@ export { Config, resolveConfig } from './config.ts'
 export type { Config as PluginConfig, ResolvedConfig } from './config.ts'
 export {
   EvolutionError,
+  failurePatternId,
+  generationReservationId,
   observationId,
   proposalId,
   toolOutcomeId,
@@ -20,8 +22,15 @@ export {
   type EvolutionServiceApi,
   type EvolutionState,
   type EvolutionVerificationProvider,
+  type FailurePattern,
+  type FailurePatternDetail,
+  type FailurePatternId,
+  type FailurePatternKeyVersion,
+  type GenerationReservationId,
   type ObservationId,
   type ProposalId,
+  type ProposalAdmissionPolicy,
+  type ProposalGenerationReservation,
   type ProposalStatus,
   type ToolFailureObservation,
   type ToolFailureObservationInput,
@@ -31,6 +40,12 @@ export {
   type VerificationOutcome,
 } from './domain.ts'
 export { evaluateEffectiveness } from './evaluation.ts'
+export {
+  canonicalizeFailureSummary,
+  deriveFailurePatternSignature,
+  FAILURE_PATTERN_KEY_VERSION,
+  type FailurePatternSignature,
+} from './pattern.ts'
 export { DeterministicSafetyVerifier, proposeToolFailureStrategy } from './proposer.ts'
 export { sanitizeEvidence, EvolutionService } from './service.ts'
 export { EvolutionStore } from './store.ts'

@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
   EvolutionError,
+  failurePatternId,
+  generationReservationId,
   observationId,
   proposalId,
   toolOutcomeId,
@@ -14,14 +16,28 @@ import {
   type EvolutionObservation,
   type EvolutionProposal,
   type EvolutionState,
+  type FailurePattern,
+  type FailurePatternId,
+  type FailurePatternKeyVersion,
+  type GenerationReservationId,
+  type ProposalAdmissionPolicy,
+  type ProposalGenerationReservation,
   type ProposalId,
   type ToolOutcome,
   type ToolOutcomeId,
   type VerificationOutcome,
 } from './domain.ts'
 import { evaluateEffectiveness } from './evaluation.ts'
+import { deriveFailurePatternSignature, type FailurePatternSignature } from './pattern.ts'
 
 const STORE_FILE = 'audit-v1.jsonl'
+
+/** Result of the lock-protected occurrence and proposal-admission phase. */
+export interface FailureAdmissionResult {
+  readonly pattern: FailurePattern
+  readonly reservation?: ProposalGenerationReservation
+  readonly priorTerminalStatus?: 'rejected' | 'superseded'
+}
 
 type EventBody = EvolutionAuditEvent extends infer Event
   ? Event extends EvolutionAuditEvent
@@ -32,6 +48,9 @@ type EventBody = EvolutionAuditEvent extends infer Event
 interface MutableState {
   readonly observations: Map<ReturnType<typeof observationId>, EvolutionObservation>
   readonly proposals: Map<ProposalId, EvolutionProposal>
+  readonly patterns: Map<FailurePatternId, FailurePattern>
+  readonly patternObservationIds: Set<ReturnType<typeof observationId>>
+  readonly reservations: Map<FailurePatternId, ProposalGenerationReservation>
   readonly outcomes: Map<ToolOutcomeId, ToolOutcome>
   readonly outcomeKeys: Set<string>
   readonly exposures: Map<string, Set<ProposalId>>
@@ -43,6 +62,9 @@ function emptyState(): MutableState {
   return {
     observations: new Map(),
     proposals: new Map(),
+    patterns: new Map(),
+    patternObservationIds: new Set(),
+    reservations: new Map(),
     outcomes: new Map(),
     outcomeKeys: new Set(),
     exposures: new Map(),
@@ -123,6 +145,57 @@ function observationOf(value: unknown): EvolutionObservation {
   })
 }
 
+interface FailurePatternSeed {
+  readonly id: FailurePatternId
+  readonly keyVersion: FailurePatternKeyVersion
+  readonly toolName: string
+  readonly errorCode: string
+  readonly canonicalSummary: string
+  readonly firstSeenAt: string
+}
+
+function patternSeedOf(value: unknown): FailurePatternSeed {
+  const raw = objectOf(value, 'failure pattern')
+  if (raw.keyVersion !== 'failure-pattern-v1') {
+    throw new EvolutionError('failure pattern key version is invalid', 'CORRUPT_STORE')
+  }
+  const seed = Object.freeze({
+    id: failurePatternId(stringOf(raw.id, 'failure pattern.id')),
+    keyVersion: raw.keyVersion,
+    toolName: stringOf(raw.toolName, 'failure pattern.toolName'),
+    errorCode: stringOf(raw.errorCode, 'failure pattern.errorCode'),
+    canonicalSummary: stringOf(raw.canonicalSummary, 'failure pattern.canonicalSummary'),
+    firstSeenAt: isoOf(raw.firstSeenAt, 'failure pattern.firstSeenAt'),
+  })
+  const expected = deriveFailurePatternSignature(
+    seed.toolName,
+    seed.errorCode,
+    seed.canonicalSummary,
+  )
+  if (expected.id !== seed.id || expected.canonicalSummary !== seed.canonicalSummary) {
+    throw new EvolutionError('failure pattern signature is inconsistent', 'CORRUPT_STORE')
+  }
+  return seed
+}
+
+function reservationOf(value: unknown): ProposalGenerationReservation {
+  const raw = objectOf(value, 'proposal generation reservation')
+  const reservation = Object.freeze({
+    id: generationReservationId(stringOf(raw.id, 'reservation.id')),
+    patternId: failurePatternId(stringOf(raw.patternId, 'reservation.patternId')),
+    proposalId: proposalId(stringOf(raw.proposalId, 'reservation.proposalId')),
+    observationId: observationId(stringOf(raw.observationId, 'reservation.observationId')),
+    generation: positiveIntegerOf(raw.generation, 'reservation.generation'),
+    occurrence: positiveIntegerOf(raw.occurrence, 'reservation.occurrence'),
+    reservedAt: isoOf(raw.reservedAt, 'reservation.reservedAt'),
+    expiresAt: isoOf(raw.expiresAt, 'reservation.expiresAt'),
+  })
+  if (reservation.expiresAt <= reservation.reservedAt) {
+    throw new EvolutionError('reservation expiry must follow reservation start', 'CORRUPT_STORE')
+  }
+  return reservation
+}
+
 function toolOutcomeOf(value: unknown): ToolOutcome {
   const raw = objectOf(value, 'tool outcome')
   if (raw.result !== 'succeeded' && raw.result !== 'failed') {
@@ -179,9 +252,20 @@ function proposalOf(value: unknown): EvolutionProposal {
   if (raw.kind !== 'strategy-guidance' || raw.status !== 'evaluating') {
     throw new EvolutionError('created proposal kind or status is invalid', 'CORRUPT_STORE')
   }
+  const patternFields =
+    raw.patternId === undefined &&
+    raw.patternOccurrence === undefined &&
+    raw.generation === undefined
+      ? {}
+      : {
+          patternId: failurePatternId(stringOf(raw.patternId, 'proposal.patternId')),
+          patternOccurrence: positiveIntegerOf(raw.patternOccurrence, 'proposal.patternOccurrence'),
+          generation: positiveIntegerOf(raw.generation, 'proposal.generation'),
+        }
   return Object.freeze({
     id: proposalId(stringOf(raw.id, 'proposal.id')),
     observationId: observationId(stringOf(raw.observationId, 'proposal.observationId')),
+    ...patternFields,
     kind: 'strategy-guidance',
     title: stringOf(raw.title, 'proposal.title'),
     guidance: stringOf(raw.guidance, 'proposal.guidance'),
@@ -200,6 +284,29 @@ function eventOf(value: unknown, expectedSeq: number): EvolutionAuditEvent {
   switch (raw.kind) {
     case 'observation-recorded':
       return { ...envelope, kind: raw.kind, observation: observationOf(raw.observation) }
+    case 'failure-pattern-created':
+      return { ...envelope, kind: raw.kind, pattern: patternSeedOf(raw.pattern) }
+    case 'failure-pattern-occurred':
+      return {
+        ...envelope,
+        kind: raw.kind,
+        patternId: failurePatternId(stringOf(raw.patternId, 'event.patternId')),
+        observationId: observationId(stringOf(raw.observationId, 'event.observationId')),
+        occurrence: positiveIntegerOf(raw.occurrence, 'event.occurrence'),
+      }
+    case 'proposal-generation-reserved':
+      return { ...envelope, kind: raw.kind, reservation: reservationOf(raw.reservation) }
+    case 'proposal-generation-abandoned': {
+      if (raw.reason !== 'provider-failed' && raw.reason !== 'expired') {
+        throw new EvolutionError('reservation abandonment reason is invalid', 'CORRUPT_STORE')
+      }
+      return {
+        ...envelope,
+        kind: raw.kind,
+        reservationId: generationReservationId(stringOf(raw.reservationId, 'event.reservationId')),
+        reason: raw.reason,
+      }
+    }
     case 'proposal-created':
       return { ...envelope, kind: raw.kind, proposal: proposalOf(raw.proposal) }
     case 'verification-recorded':
@@ -366,6 +473,24 @@ function shouldSampleOutcome(
   })
 }
 
+function reservationById(
+  state: MutableState,
+  id: GenerationReservationId,
+): ProposalGenerationReservation | undefined {
+  return [...state.reservations.values()].find((reservation) => reservation.id === id)
+}
+
+function clearPatternActiveProposal(state: MutableState, proposal: EvolutionProposal): void {
+  if (proposal.patternId === undefined) return
+  const pattern = state.patterns.get(proposal.patternId)
+  if (pattern?.activeProposalId !== proposal.id) {
+    throw new EvolutionError('pattern active proposal projection is inconsistent', 'CORRUPT_STORE')
+  }
+  const inactive = { ...pattern }
+  Reflect.deleteProperty(inactive, 'activeProposalId')
+  state.patterns.set(pattern.id, Object.freeze(inactive))
+}
+
 function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
   switch (event.kind) {
     case 'observation-recorded':
@@ -374,16 +499,124 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
       }
       state.observations.set(event.observation.id, event.observation)
       break
-    case 'proposal-created':
+    case 'failure-pattern-created': {
+      if (state.patterns.has(event.pattern.id)) {
+        throw new EvolutionError(`duplicate failure pattern ${event.pattern.id}`, 'CORRUPT_STORE')
+      }
+      state.patterns.set(
+        event.pattern.id,
+        Object.freeze({
+          ...event.pattern,
+          occurrenceCount: 0,
+          lastSeenAt: event.pattern.firstSeenAt,
+          representativeObservationIds: [],
+          latestGeneration: 0,
+        }),
+      )
+      break
+    }
+    case 'failure-pattern-occurred': {
+      const pattern = state.patterns.get(event.patternId)
+      const observation = state.observations.get(event.observationId)
+      if (pattern === undefined || observation === undefined) {
+        throw new EvolutionError('pattern occurrence references missing state', 'CORRUPT_STORE')
+      }
+      const signature = deriveFailurePatternSignature(
+        observation.toolName,
+        observation.errorCode,
+        observation.summary,
+      )
+      if (
+        signature.id !== pattern.id ||
+        state.patternObservationIds.has(observation.id) ||
+        event.occurrence !== pattern.occurrenceCount + 1 ||
+        (pattern.occurrenceCount === 0 && pattern.firstSeenAt !== observation.observedAt) ||
+        observation.observedAt < pattern.lastSeenAt
+      ) {
+        throw new EvolutionError('pattern occurrence is inconsistent', 'CORRUPT_STORE')
+      }
+      state.patterns.set(
+        pattern.id,
+        Object.freeze({
+          ...pattern,
+          occurrenceCount: event.occurrence,
+          lastSeenAt: observation.observedAt,
+          representativeObservationIds: Object.freeze(
+            [...pattern.representativeObservationIds, observation.id].slice(-8),
+          ),
+        }),
+      )
+      state.patternObservationIds.add(observation.id)
+      break
+    }
+    case 'proposal-generation-reserved': {
+      const reservation = event.reservation
+      const pattern = state.patterns.get(reservation.patternId)
+      if (
+        pattern === undefined ||
+        pattern.activeProposalId !== undefined ||
+        state.reservations.has(pattern.id) ||
+        state.proposals.has(reservation.proposalId) ||
+        !pattern.representativeObservationIds.includes(reservation.observationId) ||
+        reservation.generation !== pattern.latestGeneration + 1 ||
+        reservation.occurrence !== pattern.occurrenceCount
+      ) {
+        throw new EvolutionError('proposal reservation is inconsistent', 'CORRUPT_STORE')
+      }
+      state.reservations.set(pattern.id, reservation)
+      break
+    }
+    case 'proposal-generation-abandoned': {
+      const reservation = reservationById(state, event.reservationId)
+      if (reservation === undefined) {
+        throw new EvolutionError('abandonment references a missing reservation', 'CORRUPT_STORE')
+      }
+      state.reservations.delete(reservation.patternId)
+      break
+    }
+    case 'proposal-created': {
       if (!state.observations.has(event.proposal.observationId)) {
         throw new EvolutionError('proposal references a missing observation', 'CORRUPT_STORE')
       }
       if (state.proposals.has(event.proposal.id)) {
         throw new EvolutionError(`duplicate proposal ${event.proposal.id}`, 'CORRUPT_STORE')
       }
+      if (event.proposal.patternId !== undefined) {
+        const pattern = state.patterns.get(event.proposal.patternId)
+        const reservation = state.reservations.get(event.proposal.patternId)
+        if (
+          pattern === undefined ||
+          reservation?.proposalId !== event.proposal.id ||
+          reservation.observationId !== event.proposal.observationId ||
+          reservation.generation !== event.proposal.generation ||
+          reservation.occurrence !== event.proposal.patternOccurrence ||
+          pattern.activeProposalId !== undefined
+        ) {
+          throw new EvolutionError('pattern proposal admission is inconsistent', 'CORRUPT_STORE')
+        }
+        state.patterns.set(
+          pattern.id,
+          Object.freeze({
+            ...pattern,
+            latestProposalId: event.proposal.id,
+            latestProposalOccurrence: event.proposal.patternOccurrence,
+            latestGeneration: event.proposal.generation,
+            activeProposalId: event.proposal.id,
+          }),
+        )
+        state.reservations.delete(pattern.id)
+      }
       state.proposals.set(event.proposal.id, event.proposal)
       break
+    }
     case 'verification-recorded':
+      {
+        const before = state.proposals.get(event.proposalId)
+        if (before === undefined) {
+          throw new EvolutionError('verification references a missing proposal', 'CORRUPT_STORE')
+        }
+        if (event.outcome.decision === 'failed') clearPatternActiveProposal(state, before)
+      }
       replaceProposal(state, event.proposalId, ['evaluating'], (proposal) => ({
         ...proposal,
         status: event.outcome.decision === 'passed' ? 'pending' : 'rejected',
@@ -400,6 +633,13 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
       }))
       break
     case 'proposal-rejected':
+      {
+        const before = state.proposals.get(event.proposalId)
+        if (before === undefined) {
+          throw new EvolutionError('rejection references a missing proposal', 'CORRUPT_STORE')
+        }
+        clearPatternActiveProposal(state, before)
+      }
       replaceProposal(state, event.proposalId, ['pending', 'accepted'], (proposal) => ({
         ...proposal,
         status: 'rejected',
@@ -408,6 +648,21 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
       }))
       break
     case 'proposal-promoted': {
+      const current = state.proposals.get(event.proposalId)
+      if (
+        current?.patternId !== undefined &&
+        [...state.proposals.values()].some(
+          (proposal) =>
+            proposal.id !== current.id &&
+            proposal.patternId === current.patternId &&
+            proposal.status === 'promoted',
+        )
+      ) {
+        throw new EvolutionError(
+          'failure pattern already has a promoted generation',
+          'CORRUPT_STORE',
+        )
+      }
       replaceProposal(state, event.proposalId, ['accepted'], (proposal) => ({
         ...proposal,
         status: 'promoted',
@@ -431,6 +686,13 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
       break
     }
     case 'proposal-superseded':
+      {
+        const before = state.proposals.get(event.proposalId)
+        if (before === undefined) {
+          throw new EvolutionError('supersede references a missing proposal', 'CORRUPT_STORE')
+        }
+        clearPatternActiveProposal(state, before)
+      }
       replaceProposal(state, event.proposalId, ['promoted'], (proposal) => ({
         ...proposal,
         status: 'superseded',
@@ -519,10 +781,152 @@ export class EvolutionStore {
     return {
       observations: new Map(this.state.observations),
       proposals: new Map(this.state.proposals),
+      patterns: new Map(this.state.patterns),
+      reservations: new Map(this.state.reservations),
       outcomes: new Map(this.state.outcomes),
       evaluations: new Map(this.state.evaluations),
       lastSeq: this.state.lastSeq,
     }
+  }
+
+  /** Persist a failure occurrence and reserve at most one eligible proposal generation. */
+  admitFailure(
+    outcome: ToolOutcome | undefined,
+    observation: EvolutionObservation,
+    signature: FailurePatternSignature,
+    candidate: {
+      readonly reservationId: GenerationReservationId
+      readonly proposalId: ProposalId
+    },
+    policy: ProposalAdmissionPolicy,
+  ): Promise<FailureAdmissionResult | undefined> {
+    let admittedReservationId: GenerationReservationId | undefined
+    let priorTerminalStatus: 'rejected' | 'superseded' | undefined
+    return this.transact((state) => {
+      if (outcome && state.outcomeKeys.has(outcomeKey(outcome))) return []
+      const existing = state.patterns.get(signature.id)
+      if (
+        existing &&
+        (existing.toolName !== observation.toolName ||
+          existing.errorCode !== observation.errorCode ||
+          existing.canonicalSummary !== signature.canonicalSummary)
+      ) {
+        throw new EvolutionError(
+          'failure pattern hash collision or version mismatch',
+          'CORRUPT_STORE',
+        )
+      }
+      const occurrence = (existing?.occurrenceCount ?? 0) + 1
+      const bodies: EventBody[] = [
+        ...(outcome ? ([{ kind: 'tool-outcome-recorded', outcome }] as const) : []),
+        { kind: 'observation-recorded', observation },
+        ...(existing
+          ? []
+          : [
+              {
+                kind: 'failure-pattern-created' as const,
+                pattern: {
+                  id: signature.id,
+                  keyVersion: signature.keyVersion,
+                  toolName: observation.toolName,
+                  errorCode: observation.errorCode,
+                  canonicalSummary: signature.canonicalSummary,
+                  firstSeenAt: observation.observedAt,
+                },
+              },
+            ]),
+        {
+          kind: 'failure-pattern-occurred',
+          patternId: signature.id,
+          observationId: observation.id,
+          occurrence,
+        },
+      ]
+      const currentReservation = existing && state.reservations.get(existing.id)
+      const nowMs = Date.parse(observation.observedAt)
+      const reservationExpired =
+        currentReservation !== undefined && Date.parse(currentReservation.expiresAt) <= nowMs
+      if (reservationExpired) {
+        bodies.push({
+          kind: 'proposal-generation-abandoned',
+          reservationId: currentReservation.id,
+          reason: 'expired',
+        })
+      }
+      const latestProposal =
+        existing?.latestProposalId === undefined
+          ? undefined
+          : state.proposals.get(existing.latestProposalId)
+      if (latestProposal?.status === 'rejected' || latestProposal?.status === 'superseded') {
+        priorTerminalStatus = latestProposal.status
+      }
+      const occurrencesSinceProposal =
+        existing?.latestProposalOccurrence === undefined
+          ? Number.POSITIVE_INFINITY
+          : occurrence - existing.latestProposalOccurrence
+      const eligible =
+        existing?.activeProposalId === undefined &&
+        (currentReservation === undefined || reservationExpired) &&
+        (latestProposal === undefined ||
+          ((latestProposal.status === 'rejected' || latestProposal.status === 'superseded') &&
+            occurrencesSinceProposal >= policy.reproposalAfterOccurrences))
+      if (eligible) {
+        const reservation: ProposalGenerationReservation = Object.freeze({
+          id: candidate.reservationId,
+          patternId: signature.id,
+          proposalId: candidate.proposalId,
+          observationId: observation.id,
+          generation: (existing?.latestGeneration ?? 0) + 1,
+          occurrence,
+          reservedAt: observation.observedAt,
+          expiresAt: new Date(nowMs + policy.generationReservationTimeoutMs).toISOString(),
+        })
+        bodies.push({ kind: 'proposal-generation-reserved', reservation })
+        admittedReservationId = reservation.id
+      }
+      return bodies
+    }).then((state) => {
+      const pattern = state.patterns.get(signature.id)
+      if (pattern === undefined) return undefined
+      const reservation = state.reservations.get(signature.id)
+      return Object.freeze({
+        pattern,
+        ...(admittedReservationId !== undefined && reservation?.id === admittedReservationId
+          ? { reservation }
+          : {}),
+        ...(priorTerminalStatus ? { priorTerminalStatus } : {}),
+      })
+    })
+  }
+
+  /** Complete the exact still-owned reservation with proposal and verification facts. */
+  finalizeReservation(
+    reservationId: GenerationReservationId,
+    proposal: EvolutionProposal,
+    verification: VerificationOutcome,
+  ): Promise<EvolutionProposal> {
+    return this.transact((state) => {
+      const reservation = reservationById(state, reservationId)
+      if (reservation?.proposalId !== proposal.id) {
+        throw new EvolutionError('proposal generation reservation was lost', 'INVALID_TRANSITION')
+      }
+      return [
+        { kind: 'proposal-created', proposal },
+        { kind: 'verification-recorded', proposalId: proposal.id, outcome: verification },
+      ]
+    }).then((state) => this.requireProposal(state, proposal.id))
+  }
+
+  /** Release a reservation after provider failure; a later occurrence may retry generation. */
+  abandonReservation(
+    reservationId: GenerationReservationId,
+    reason: 'provider-failed',
+  ): Promise<void> {
+    return this.transact((state) =>
+      reservationById(state, reservationId)
+        ? [{ kind: 'proposal-generation-abandoned', reservationId, reason }]
+        : [],
+    ).then(() => undefined)
   }
 
   /** Atomically persist observation, proposal, and verification facts. */
@@ -612,6 +1016,20 @@ export class EvolutionStore {
       if (current.status !== 'accepted') {
         throw new EvolutionError(
           `proposal ${id} cannot transition from ${current.status} to promoted`,
+          'INVALID_TRANSITION',
+        )
+      }
+      if (
+        current.patternId !== undefined &&
+        [...state.proposals.values()].some(
+          (proposal) =>
+            proposal.id !== current.id &&
+            proposal.patternId === current.patternId &&
+            proposal.status === 'promoted',
+        )
+      ) {
+        throw new EvolutionError(
+          `failure pattern ${current.patternId} already has a promoted generation`,
           'INVALID_TRANSITION',
         )
       }

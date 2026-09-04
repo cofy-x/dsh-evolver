@@ -12,6 +12,8 @@ export interface Config {
   readonly evaluationWindowSize?: number
   readonly minimumEvaluationSamples?: number
   readonly regressionThreshold?: number
+  readonly reproposalAfterOccurrences?: number
+  readonly generationReservationTimeoutMs?: number
 }
 
 /** Fully resolved settings used by runtime modules. */
@@ -22,6 +24,8 @@ export interface ResolvedConfig {
   readonly evaluationWindowSize: number
   readonly minimumEvaluationSamples: number
   readonly regressionThreshold: number
+  readonly reproposalAfterOccurrences: number
+  readonly generationReservationTimeoutMs: number
 }
 
 /** Loader-visible schema. */
@@ -32,6 +36,8 @@ export const Config = z.object({
   evaluationWindowSize: z.natural().default(20),
   minimumEvaluationSamples: z.natural().default(5),
   regressionThreshold: z.number().default(0.15),
+  reproposalAfterOccurrences: z.natural().default(5),
+  generationReservationTimeoutMs: z.natural().default(300_000),
 }) as unknown as z<Config>
 
 function positiveSafe(value: number, field: string): number {
@@ -76,6 +82,20 @@ export function resolveConfig(config: Config): ResolvedConfig {
   ) {
     throw new Error('dsh-evolver: regressionThreshold must be greater than 0 and at most 1')
   }
+  const reproposalAfterOccurrences = positiveSafe(
+    config.reproposalAfterOccurrences ?? 5,
+    'reproposalAfterOccurrences',
+  )
+  if (reproposalAfterOccurrences > 1_000) {
+    throw new Error('dsh-evolver: reproposalAfterOccurrences must not exceed 1000')
+  }
+  const generationReservationTimeoutMs = positiveSafe(
+    config.generationReservationTimeoutMs ?? 300_000,
+    'generationReservationTimeoutMs',
+  )
+  if (generationReservationTimeoutMs > 86_400_000) {
+    throw new Error('dsh-evolver: generationReservationTimeoutMs must not exceed 86400000')
+  }
   const dataDir = config.dataDir ?? join(resolveDshHome(), 'evolver')
   if (dataDir.trim().length === 0) throw new Error('dsh-evolver: dataDir must be non-blank')
   return {
@@ -85,5 +105,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     evaluationWindowSize,
     minimumEvaluationSamples,
     regressionThreshold,
+    reproposalAfterOccurrences,
+    generationReservationTimeoutMs,
   }
 }

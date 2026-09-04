@@ -20,6 +20,7 @@ afterEach(async () => {
 
 async function mount(): Promise<{
   ctx: Context
+  root: string
   agent: Agent
   injected: UserMessage[]
   fiber: Awaited<ReturnType<Context['plugin']>>
@@ -45,17 +46,20 @@ async function mount(): Promise<{
       injected.push(message)
     },
   } as unknown as Agent
-  return { ctx, agent, injected, fiber }
+  return { ctx, root, agent, injected, fiber }
 }
 
-function failedExecution(agent: Agent): {
+function failedExecution(
+  agent: Agent,
+  callId = 'call-1',
+): {
   exec: ToolExecution
   result: ToolExecutionResult
 } {
   return {
     exec: {
-      callId: 'call-1',
-      rootCallId: 'call-1',
+      callId,
+      rootCallId: callId,
       token: Symbol('tool'),
       name: 'bash',
       arguments: { command: 'private input is not persisted' },
@@ -93,7 +97,7 @@ function successfulExecution(agent: Agent): {
 
 describe('dsh-evolver plugin', () => {
   it('collects a failed tool, exposes human review, and injects only promoted guidance', async () => {
-    const { ctx, agent, injected } = await mount()
+    const { ctx, root, agent, injected } = await mount()
     const { exec, result } = failedExecution(agent)
     ctx.emit('tools/result', exec, result)
     await ctx.evolver.whenIdle()
@@ -103,6 +107,42 @@ describe('dsh-evolver plugin', () => {
     if (proposal === undefined) throw new Error('expected proposal')
     expect(proposal.status).toBe('pending')
     expect(proposal.guidance).not.toContain('private input')
+    if (proposal.patternId === undefined) throw new Error('expected pattern association')
+
+    const repeated = failedExecution(agent, 'call-repeat')
+    ctx.emit('tools/result', repeated.exec, repeated.result)
+    await ctx.evolver.whenIdle()
+    expect(ctx.evolver.listProposals()).toHaveLength(1)
+    expect(ctx.evolver.getPattern(proposal.patternId)?.occurrenceCount).toBe(2)
+
+    const patterns = await ctx.commands.execute(
+      agent,
+      '/evolve patterns',
+      [],
+      new AbortController().signal,
+    )
+    expect(patterns?.result.text).toContain(proposal.patternId)
+    const pattern = await ctx.commands.execute(
+      agent,
+      `/evolve pattern ${proposal.patternId}`,
+      [],
+      new AbortController().signal,
+    )
+    expect(pattern?.result.text).toContain('Occurrences: 2')
+    expect(pattern?.result.text).toContain(`Latest proposal: ${proposal.id} (pending)`)
+
+    const audit = await readFile(join(root, 'audit-v1.jsonl'), 'utf8')
+    expect(audit).not.toContain('private input is not persisted')
+    expect(audit).not.toContain('complete private output is ignored')
+    expect(audit).not.toContain('top-secret')
+    const auditKinds = audit
+      .trimEnd()
+      .split('\n')
+      .map((line) => (JSON.parse(line) as { kind: string }).kind)
+    expect(auditKinds.filter((kind) => kind === 'tool-outcome-recorded')).toHaveLength(2)
+    expect(auditKinds.filter((kind) => kind === 'observation-recorded')).toHaveLength(2)
+    expect(auditKinds.filter((kind) => kind === 'failure-pattern-occurred')).toHaveLength(2)
+    expect(auditKinds.filter((kind) => kind === 'proposal-created')).toHaveLength(1)
 
     const accepted = await ctx.commands.execute(
       agent,
@@ -160,6 +200,7 @@ describe('dsh-evolver plugin', () => {
     ctx.emit('tools/result', exec, result)
     await service.whenIdle()
     expect(service.listProposals()).toHaveLength(0)
+    expect(service.listPatterns()).toHaveLength(0)
     expect(warn).not.toHaveBeenCalled()
   })
 })

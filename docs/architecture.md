@@ -7,6 +7,8 @@ DSH Evolver is a proposal lifecycle plugin, not an Agent implementation or auton
 ```text
 failed tools/result
   -> bounded redacted observation
+  -> versioned exact failure pattern
+  -> durable generation reservation
   -> deterministic strategy proposal
   -> deterministic safety verification
   -> human accept or reject
@@ -17,7 +19,7 @@ failed tools/result
   -> human keep or rollback
 ```
 
-The runtime observes the immutable final `tools/result`, ignores agentless calls, and persists only outcome metadata plus bounded evidence for failures—never tool arguments, successful values, or returned content. A proposal begins in `evaluating`; deterministic verification moves it to `pending` or `rejected`. Human acceptance moves a verified pending proposal to `accepted`, and promotion is valid only from `accepted`. Promotion starts a bounded evaluation; human rollback moves a promoted proposal to `superseded`. Repeating the same transition is idempotent.
+The runtime observes the immutable final `tools/result`, ignores agentless calls, and persists only outcome metadata plus bounded evidence for failures—never tool arguments, successful values, or returned content. Each failure increments one exact pattern before proposal admission is considered. A proposal begins in `evaluating`; deterministic verification moves it to `pending` or `rejected`. Human acceptance moves a verified pending proposal to `accepted`, and promotion is valid only from `accepted`. Promotion starts a bounded evaluation; human rollback moves a promoted proposal to `superseded`. Repeating the same transition is idempotent.
 
 ## Module ownership
 
@@ -26,6 +28,7 @@ The runtime observes the immutable final `tools/result`, ignores agentless calls
 | `domain.ts`     | Branded identifiers, proposal states, audit vocabulary, service/provider interfaces |
 | `config.ts`     | Loader schema and deployment bounds                                                 |
 | `evaluation.ts` | Pure baseline/treatment verdict calculation                                         |
+| `pattern.ts`    | Pure summary canonicalization and versioned deterministic pattern signatures        |
 | `proposer.ts`   | Deterministic proposal and offline safety-verification providers                    |
 | `store.ts`      | Versioned JSONL validation, replay, transition enforcement, atomic commits          |
 | `service.ts`    | Input normalization, redaction, provider orchestration, lifecycle admission         |
@@ -36,7 +39,17 @@ These modules remain one package because the current provider and consumers rele
 
 ## Persistence and recovery
 
-`$DSH_HOME/evolver/audit-v1.jsonl` is the source of truth. Each atomic mutation acquires the DSH file lock, validates and replays the complete stream, appends one or more monotonically sequenced facts in memory, and atomically replaces the file with mode `0600`. The outcome, observation, proposal, and verification facts for one collected failure commit together. Corrupt JSON, unknown events, sequence gaps, duplicate outcome keys, invalid references, inconsistent evaluation projections, and invalid transitions fail startup instead of returning partial state. Audit streams produced by the initial MVP before promotion evaluations existed remain replayable with the documented default policy.
+`$DSH_HOME/evolver/audit-v1.jsonl` is the source of truth. Each atomic mutation acquires the DSH file lock, validates and replays the complete stream, appends one or more monotonically sequenced facts in memory, and atomically replaces the file with mode `0600`. For a failure, the outcome, observation, pattern creation or increment, and any admission reservation commit together. Corrupt JSON, unknown events, sequence gaps, duplicate outcome keys or occurrence links, invalid references, inconsistent generations or evaluation projections, and invalid transitions fail startup instead of returning partial state. Audit streams produced by the initial MVP and evaluation phase remain replayable without rewriting; their proposals are treated as legacy unassociated proposals.
+
+## Failure patterns and proposal admission
+
+`failure-pattern-v1` hashes the JSON tuple `(version, toolName, errorCode, canonicalSummary)` with Node's SHA-256 implementation. Tool name and error code are validated bounded tokens. The already-redacted summary is lowercased and whitespace-normalized, then UUIDs, long hexadecimal identifiers, standalone numeric IDs, URLs, user-home prefixes, and redacted credential placeholders are replaced with stable markers. Field boundaries remain explicit, so the same summary from different tools or error codes cannot merge. This deliberately offers reproducible exact matching only; semantic similarity and cross-version migration are out of scope.
+
+The three evidence layers have different ownership. An observation is one independently persisted bounded failure fact. A pattern is a deterministic replay projection over observations sharing a signature; it does not replace or rewrite them. A proposal is one verifier-gated strategy generation linked to the exact observation and occurrence that admitted it. Embeddings and LLM classification are deferred because they introduce nondeterministic replay, extra sensitive-data transfer, provider cost, and similarity-threshold policy before operational evidence shows exact matching is inadequate.
+
+Patterns retain occurrence count, first and last timestamps, proposal generation linkage, and at most eight recent representative observation IDs. The first occurrence is immediately eligible for generation 1. An evaluating, pending, accepted, or promoted proposal blocks another generation for its pattern. A rejected or superseded proposal becomes eligible only after exactly `reproposalAfterOccurrences` additional matching failures; with the default five, generation 2 is created at occurrence 6. Evaluation cohorts remain attached to proposal IDs, so generations never share baseline or treatment evidence. Store transition checks also prevent two generations of one pattern from being promoted simultaneously.
+
+Admission is a two-lock protocol around potentially expensive provider work. The first locked transaction records the occurrence and reserves a unique proposal ID and generation. The owner invokes the proposer and verifier outside the lock. A second locked transaction creates the proposal and verification facts only if that exact reservation is still live. Provider failure records abandonment without losing the occurrence. Process crashes can leave a reservation, so it has a bounded lease; after expiry, the next matching occurrence atomically abandons it and reserves the generation again. A stale provider completion then fails closed. Disposal stops new admission and waits for admitted provider and persistence operations to settle.
 
 The MVP chooses JSONL because the stream is small, writes are infrequent, and audit readability matters more than indexed queries. SQLite becomes justified only after measured volume or multi-process query requirements exceed whole-log replay.
 

@@ -32,6 +32,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       minimumSamples: resolved.minimumEvaluationSamples,
       regressionThreshold: resolved.regressionThreshold,
     },
+    {
+      reproposalAfterOccurrences: resolved.reproposalAfterOccurrences,
+      generationReservationTimeoutMs: resolved.generationReservationTimeoutMs,
+    },
   )
   ctx.provide('evolver', service)
   registerEvolutionCommand(ctx, service)

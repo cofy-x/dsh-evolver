@@ -11,6 +11,8 @@ describe('resolveConfig()', () => {
         evaluationWindowSize: 10,
         minimumEvaluationSamples: 3,
         regressionThreshold: 0.2,
+        reproposalAfterOccurrences: 7,
+        generationReservationTimeoutMs: 60_000,
       }),
     ).toEqual({
       dataDir: '/tmp/evolver-test',
@@ -19,6 +21,8 @@ describe('resolveConfig()', () => {
       evaluationWindowSize: 10,
       minimumEvaluationSamples: 3,
       regressionThreshold: 0.2,
+      reproposalAfterOccurrences: 7,
+      generationReservationTimeoutMs: 60_000,
     })
   })
 
@@ -31,6 +35,10 @@ describe('resolveConfig()', () => {
     [{ evaluationWindowSize: 4, minimumEvaluationSamples: 5 }, 'minimumEvaluationSamples'],
     [{ regressionThreshold: 0 }, 'regressionThreshold'],
     [{ regressionThreshold: 1.1 }, 'regressionThreshold'],
+    [{ reproposalAfterOccurrences: 0 }, 'reproposalAfterOccurrences'],
+    [{ reproposalAfterOccurrences: 1_001 }, 'reproposalAfterOccurrences'],
+    [{ generationReservationTimeoutMs: 0 }, 'generationReservationTimeoutMs'],
+    [{ generationReservationTimeoutMs: 86_400_001 }, 'generationReservationTimeoutMs'],
     [{ dataDir: ' ' }, 'dataDir'],
   ] as const)('rejects invalid config %j', (config, expected) => {
     expect(() => resolveConfig(config)).toThrow(expected)
