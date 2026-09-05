@@ -70,7 +70,7 @@ After both cohorts reach `minimumEvaluationSamples`, the evaluator compares fail
 
 ## Model experience
 
-Before promotion, the plugin adds no model tokens and changes no tool schema. On a later `agent/session-start`, up to the configured number of promoted strategies are combined into one plugin-sourced instruction message and queued with `agent.inject()`. The existing Agent loop commits that message as canonical Session input before it reaches a model request. The injected text is bounded by the maximum strategy count and fixed-size proposal guidance.
+Before promotion, the plugin adds no model tokens and changes no tool schema. On a later `agent/session-start`, up to the configured number of promoted strategies are combined into one plugin-sourced instruction message and queued with `agent.inject()`. Only after synchronous injection succeeds does the runtime queue exposure persistence, so rejected injection cannot create false exposure. The existing Agent loop commits that message as canonical Session input before it reaches a model request. The injected text is bounded by the maximum strategy count and fixed-size proposal guidance. Exposure persistence and Session commitment are not a shared durability transaction; see [tested failure boundaries](runtime-validation.md).
 
 ## Security invariants
 

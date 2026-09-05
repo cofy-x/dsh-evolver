@@ -63,14 +63,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.on('agent/session-start', ({ agent }) => {
     const promoted = service.listPromoted().slice(-resolved.maxPromotedStrategies)
     if (promoted.length === 0) return
-    void service
-      .recordExposure(
-        String(agent.session.id),
-        promoted.map((proposal) => proposal.id),
-      )
-      .catch((error: unknown) => {
-        ctx.logger.warn(`dsh-evolver failed to persist a strategy exposure: ${String(error)}`)
-      })
     const text = [
       'Promoted evolution strategies:',
       ...promoted.map((proposal) => `- ${proposal.title}: ${proposal.guidance}`),
@@ -81,6 +73,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         source: { kind: 'plugin', plugin: 'dsh-evolver', form: 'instructions' },
       }),
     )
+    // A synchronous injection rejection must not create an exposure for unseen guidance.
+    void service
+      .recordExposure(
+        String(agent.session.id),
+        promoted.map((proposal) => proposal.id),
+      )
+      .catch((error: unknown) => {
+        ctx.logger.warn(`dsh-evolver failed to persist a strategy exposure: ${String(error)}`)
+      })
   })
 
   ctx.effect(

@@ -1,0 +1,355 @@
+/** Public-package-only shipped profile integration. No Harness test helpers or private source imports. */
+import assert from 'node:assert/strict'
+import { createRequire, registerHooks, syncBuiltinESMExports } from 'node:module'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { writeFile, readFile } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import net from 'node:net'
+import http from 'node:http'
+import https from 'node:https'
+import tls from 'node:tls'
+
+const [harness, profileName, root, phase] = process.argv.slice(2)
+const manifests = new Map()
+function discover(dir) {
+  const manifest = join(dir, 'package.json')
+  if (existsSync(manifest)) {
+    const pkg = JSON.parse(readFileSync(manifest, 'utf8'))
+    if (pkg.name?.startsWith('@deepseek-ai/')) manifests.set(pkg.name, manifest)
+    return
+  }
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (
+      entry.isDirectory() &&
+      !entry.name.startsWith('.') &&
+      !['node_modules', 'lib', 'dist'].includes(entry.name)
+    )
+      discover(join(dir, entry.name))
+  }
+}
+discover(join(harness, 'packages'))
+discover(join(harness, 'vendor'))
+discover(join(harness, 'apps'))
+// Route every DSH/Cordis import, including Evolver's peers, through one checkout's public exports.
+let resolvingPublicExport = false
+registerHooks({
+  resolve(specifier, context, next) {
+    if (!resolvingPublicExport && specifier.startsWith('@deepseek-ai/')) {
+      const name = specifier.split('/').slice(0, 2).join('/')
+      const manifest = manifests.get(name)
+      if (!manifest && name.startsWith('@deepseek-ai/node-addon-')) return next(specifier, context)
+      assert.ok(manifest, `host package missing: ${name}`)
+      let resolved
+      resolvingPublicExport = true
+      try {
+        resolved = createRequire(manifest).resolve(specifier)
+      } finally {
+        resolvingPublicExport = false
+      }
+      return next(resolved, context)
+    }
+    return next(specifier, context)
+  },
+})
+let networkAttempts = 0
+function denyNetwork() {
+  networkAttempts++
+  throw new Error('E2E forbids outbound network')
+}
+globalThis.fetch = denyNetwork
+net.Socket.prototype.connect = denyNetwork
+http.request = denyNetwork
+https.request = denyNetwork
+tls.connect = denyNetwork
+syncBuiltinESMExports()
+
+const { boot, loadProfile, composeEntries } = await import('@deepseek-ai/dsh-app-boot')
+const { LlmAdapter, createUserMessage } = await import('@deepseek-ai/dsh-llm')
+const { defineTool } = await import('@deepseek-ai/dsh-tools')
+const { SessionId } = await import('@deepseek-ai/dsh-session')
+const evolverUrl = new URL('../../lib/index.js', import.meta.url)
+const { EvolutionStore } = await import(evolverUrl.href)
+const anchor = join(harness, 'apps/cli/package.json')
+const profile = loadProfile('evolver-e2e', profileName, anchor, process.env.DSH_HOME, {
+  userLayer: false,
+})
+const basePatches = profile.layers.flatMap((layer) => layer.patches)
+const entries = composeEntries([basePatches])
+const disabled = new Set([
+  'llm-deepseek',
+  'llm-pi-ai',
+  'session-title-llm',
+  'session-telemetry-otel',
+  'llm-retry',
+  'skill-filesystem',
+  'agent-instructions',
+  'web-search-deepseek',
+  'web-fetch-http',
+  'plan-mode',
+])
+// Keep real runtime services and profile-specific UI/driver rows; hide all production tools.
+for (const entry of entries) if (entry.id?.startsWith('tool-')) disabled.add(entry.id)
+const overlays = [...disabled]
+  .filter((id) => entries.some((entry) => entry.id === id))
+  .map((id) => ({ id, disabled: true }))
+overlays.push(
+  { id: 'agent-default-model', config: { provider: 'evolver-script', model: 'script-v1' } },
+  { id: 'tools', config: { mode: 'native' } },
+  {
+    insert: [
+      {
+        id: 'dsh-evolver',
+        name: evolverUrl.href,
+        config: {
+          dataDir: join(root, 'evolver'),
+          evaluationWindowSize: 2,
+          minimumEvaluationSamples: 1,
+        },
+      },
+    ],
+  },
+)
+const configFile = join(profile.dir, 'cordis.yml')
+await writeFile(configFile, '[]\n')
+const requests = []
+const scripted = []
+function textChunks() {
+  return [
+    { type: 'block-start', index: 0, blockType: 'text' },
+    { type: 'text-delta', index: 0, text: 'fixture complete' },
+    { type: 'block-end', index: 0, block: { type: 'text', text: 'fixture complete' } },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ]
+}
+function toolChunks(callId, fail) {
+  return [
+    { type: 'block-start', index: 0, blockType: 'tool-call' },
+    {
+      type: 'tool-call-delta',
+      index: 0,
+      id: callId,
+      name: 'evolver_probe',
+      argumentsDelta: JSON.stringify({ fail, privateValue: 'PRIVATE_ARGUMENT_SENTINEL' }),
+    },
+    {
+      type: 'block-end',
+      index: 0,
+      block: {
+        type: 'tool-call',
+        id: callId,
+        name: 'evolver_probe',
+        arguments: JSON.stringify({ fail, privateValue: 'PRIVATE_ARGUMENT_SENTINEL' }),
+      },
+    },
+    { type: 'finish', reason: { kind: 'tool-calls' } },
+  ]
+}
+class ScriptAdapter extends LlmAdapter {
+  async resolveModel(provider, model) {
+    return { provider, id: model, name: model }
+  }
+  async *stream(options) {
+    requests.push(options)
+    assert.ok(requests.length <= 20, 'request budget exceeded')
+    assert.deepEqual(
+      options.tools?.map((tool) => tool.name),
+      ['evolver_probe'],
+    )
+    const response = scripted.shift()
+    assert.ok(response, 'unexpected model request')
+    yield* response
+  }
+}
+let completedHeadless
+const headlessDone = new Promise((resolve) => {
+  completedHeadless = resolve
+})
+let fixtureFiber
+if (profileName === 'headless') scripted.push(textChunks())
+let ctx
+try {
+  ctx = await boot(
+    'evolver-e2e',
+    configFile,
+    [...basePatches, ...overlays],
+    async (host) => {
+      host.provide('cmdlineArgs', {
+        get: () =>
+          profileName === 'headless' ? ['fixture startup'] : ['--no-open', '--port', '0'],
+      })
+      host.provide('appExit', (code) => {
+        assert.equal(code, 0)
+        completedHeadless()
+      })
+      fixtureFiber = await host.plugin({
+        name: 'evolver-e2e-fixture',
+        inject: ['llm', 'tools'],
+        apply(scoped) {
+          scoped.llm.registerAdapter(['evolver-script'], new ScriptAdapter())
+          scoped.tools.register(
+            defineTool({
+              name: 'evolver_probe',
+              description: 'Side-effect-free synthetic test probe.',
+              parameters: {
+                fail: { type: 'boolean', required: true },
+                privateValue: { type: 'string', required: true },
+              },
+              output: {
+                schema: { type: 'string' },
+                render: () => [{ type: 'text', text: 'COMPLETE_OUTPUT_SENTINEL' }],
+              },
+              execute(args) {
+                if (args.fail) throw new Error('probe failure password=TEST_SECRET_SENTINEL')
+                return 'COMPLETE_OUTPUT_SENTINEL'
+              },
+            }),
+          )
+        },
+      })
+    },
+    pathToFileURL(dirname(anchor)).href + '/',
+  )
+  if (profileName === 'headless') await headlessDone
+  assert.ok(ctx.agents && ctx.sessions && ctx.evolver && ctx.commands)
+  const names = [...ctx.loader.entries()]
+    .filter((entry) => !entry.disabled)
+    .map((entry) => entry.options.name)
+  assert.ok(
+    names.includes(
+      profileName === 'headless' ? '@deepseek-ai/dsh-headless' : '@deepseek-ai/dsh-web-app',
+    ),
+  )
+  if (profileName === 'web') {
+    assert.ok(ctx.get('webRuntime'))
+    assert.ok(ctx.get('webServer').port > 0)
+  } else if (phase === 'recovery') {
+    const [pattern] = ctx.evolver.listPatterns()
+    const [proposal] = ctx.evolver.listProposals()
+    assert.equal(pattern.occurrenceCount, 2)
+    assert.equal(pattern.latestGeneration, 1)
+    assert.equal(proposal.status, 'superseded')
+    assert.deepEqual(
+      ctx.evolver.getEvaluation(proposal.id),
+      JSON.parse(await readFile(join(root, 'expected-evaluation.json'), 'utf8')),
+    )
+    assert.equal(JSON.stringify(requests).includes(proposal.guidance), false)
+    const persisted = await ctx.sessionPersistence.open(SessionId('evolver-treatment'), 'read')
+    try {
+      const messages = (await persisted.read()).filter((event) => event.type === 'user/message')
+      assert.ok(JSON.stringify(messages).includes(proposal.guidance))
+    } finally {
+      await persisted.close()
+    }
+  } else {
+    const handles = []
+    const fresh = async (id) => {
+      const handle = await ctx.agents.create({
+        sessionId: SessionId(id),
+        meta: { cwd: process.cwd() },
+        agentOptions: { provider: 'evolver-script', model: 'script-v1', maxTokens: 512 },
+      })
+      handles.push(handle)
+      return handle.agent
+    }
+    const turn = async (agent, chunks) => {
+      scripted.push(...chunks)
+      agent.followup(
+        createUserMessage({
+          content: [{ type: 'text', text: 'Run the synthetic probe.' }],
+          source: { kind: 'user' },
+        }),
+      )
+      await agent.whenIdle()
+      await ctx.evolver.whenIdle()
+      await ctx.sessions.flush(agent.session)
+      assert.equal(scripted.length, 0, 'script was not consumed')
+    }
+    const command = async (agent, input) => {
+      const answer = await ctx.commands.execute(agent, input, [], new AbortController().signal)
+      assert.equal(answer?.result.kind, 'success', JSON.stringify(answer))
+    }
+    const baseline = await fresh('evolver-baseline')
+    await turn(baseline, [
+      toolChunks('failure-1', true),
+      toolChunks('failure-2', true),
+      textChunks(),
+    ])
+    let state = (await EvolutionStore.open(join(root, 'evolver'))).snapshot()
+    assert.equal(state.observations.size, 2)
+    assert.equal(state.patterns.size, 1)
+    const proposal = ctx.evolver.listProposals()[0]
+    assert.equal(ctx.evolver.listProposals().length, 1)
+    assert.equal(proposal.status, 'pending')
+    const hasGuidance = (value) => JSON.stringify(value).includes(proposal.guidance)
+    assert.equal(requests.some(hasGuidance), false)
+    await command(baseline, `/evolve accept ${proposal.id}`)
+    const accepted = await fresh('evolver-accepted')
+    await turn(accepted, [textChunks()])
+    assert.equal(hasGuidance(requests.at(-1)), false)
+    await command(baseline, `/evolve promote ${proposal.id}`)
+    const treatment = await fresh('evolver-treatment')
+    await turn(treatment, [toolChunks('success-exposed', false), textChunks()])
+    assert.ok(hasGuidance(requests.at(-1)))
+    assert.ok(
+      hasGuidance(
+        treatment.session.snapshotEvents().filter((event) => event.type === 'user/message'),
+      ),
+    )
+    assert.equal(ctx.evolver.getEvaluation(proposal.id).treatment.total, 1)
+    await turn(baseline, [toolChunks('success-unexposed', false), textChunks()])
+    assert.equal(ctx.evolver.getEvaluation(proposal.id).treatment.total, 1)
+    await command(baseline, `/evolve rollback ${proposal.id} fixture rollback`)
+    const rolledBack = await fresh('evolver-rollback')
+    await turn(rolledBack, [textChunks()])
+    assert.equal(hasGuidance(requests.at(-1)), false)
+    assert.equal(hasGuidance(rolledBack.session.snapshotEvents()), false)
+    const evaluation = ctx.evolver.getEvaluation(proposal.id)
+    await writeFile(join(root, 'expected-evaluation.json'), JSON.stringify(evaluation))
+    const evolverEntry = [...ctx.loader.entries()].find(
+      (entry) => entry.options.id === 'dsh-evolver',
+    )
+    const service = ctx.evolver
+    await evolverEntry.fiber.dispose()
+    assert.equal(ctx.commands.find(baseline, 'evolve'), undefined)
+    await turnWithoutEvolver(rolledBack)
+    await service.whenIdle()
+    state = (await EvolutionStore.open(join(root, 'evolver'))).snapshot()
+    assert.equal(state.observations.size, 2)
+    assert.equal(state.patterns.get(proposal.patternId).occurrenceCount, 2)
+    assert.equal(state.patterns.get(proposal.patternId).latestGeneration, 1)
+    assert.equal(state.proposals.get(proposal.id).status, 'superseded')
+    assert.deepEqual(state.evaluations.get(proposal.id), evaluation)
+    const audit = await readFile(join(root, 'evolver', 'audit-v1.jsonl'), 'utf8')
+    for (const secret of [
+      'PRIVATE_ARGUMENT_SENTINEL',
+      'COMPLETE_OUTPUT_SENTINEL',
+      'TEST_SECRET_SENTINEL',
+    ])
+      assert.equal(audit.includes(secret), false)
+    const sessionFiles = readdirSync(join(process.env.DSH_HOME, 'sessions'), { recursive: true })
+    assert.ok(sessionFiles.length > 0, 'canonical Sessions must be persisted')
+    for (const handle of handles) await handle.dispose()
+    async function turnWithoutEvolver(agent) {
+      scripted.push(toolChunks('after-dispose', true), textChunks())
+      agent.followup(
+        createUserMessage({
+          content: [{ type: 'text', text: 'Run probe after Evolver disposal.' }],
+          source: { kind: 'user' },
+        }),
+      )
+      await agent.whenIdle()
+      assert.equal(scripted.length, 0, JSON.stringify(agent.session.snapshotEvents().slice(-6)))
+    }
+  }
+  await fixtureFiber.dispose()
+  assert.equal(ctx.tools.get('evolver_probe'), undefined)
+  await ctx.fiber.dispose()
+  assert.equal(ctx.get('agents'), undefined)
+  assert.equal(networkAttempts, 0)
+  console.log(
+    `EVOLVER_E2E_PASS ${profileName} ${JSON.stringify({ phase, bundles: profile.layers.map((layer) => layer.packageName), requests: requests.length, networkAttempts, dshVersion: JSON.parse(readFileSync(anchor, 'utf8')).version })}`,
+  )
+} finally {
+  await ctx?.fiber.dispose()
+}

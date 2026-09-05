@@ -14,6 +14,7 @@ const roots: string[] = []
 const contexts: Context[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(contexts.splice(0).map((ctx) => ctx.fiber.dispose()))
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
@@ -96,6 +97,48 @@ function successfulExecution(agent: Agent): {
 }
 
 describe('dsh-evolver plugin', () => {
+  it('does not record exposure when synchronous injection fails', async () => {
+    const { ctx, root, agent } = await mount()
+    const { exec, result } = failedExecution(agent)
+    ctx.emit('tools/result', exec, result)
+    await ctx.evolver.whenIdle()
+    const proposal = ctx.evolver.listProposals()[0]
+    if (proposal === undefined) throw new Error('expected proposal')
+    await ctx.evolver.accept(proposal.id)
+    await ctx.evolver.promote(proposal.id)
+    const inject = vi.spyOn(agent, 'inject').mockImplementation(() => {
+      throw new Error('inbox unavailable')
+    })
+    agentEvents(ctx, agent).emit('agent/session-start', { source: 'startup' })
+    expect(inject).toHaveBeenCalledOnce()
+    await ctx.evolver.whenIdle()
+    expect(await readFile(join(root, 'audit-v1.jsonl'), 'utf8')).not.toContain('strategies-exposed')
+  })
+
+  it('reports exposure write failure without counting unrecorded treatment', async () => {
+    const { ctx, agent, injected } = await mount()
+    const { exec, result } = failedExecution(agent)
+    ctx.emit('tools/result', exec, result)
+    await ctx.evolver.whenIdle()
+    const proposal = ctx.evolver.listProposals()[0]
+    if (proposal === undefined) throw new Error('expected proposal')
+    await ctx.evolver.accept(proposal.id)
+    await ctx.evolver.promote(proposal.id)
+    const { EvolutionStore } = EvolverPlugin
+    vi.spyOn(EvolutionStore.prototype, 'recordExposure').mockRejectedValueOnce(
+      new Error('disk unavailable'),
+    )
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => undefined)
+    agentEvents(ctx, agent).emit('agent/session-start', { source: 'startup' })
+    await ctx.evolver.whenIdle()
+    expect(injected).toHaveLength(1)
+    expect(warn).toHaveBeenCalled()
+    const success = successfulExecution(agent)
+    ctx.emit('tools/result', success.exec, success.result)
+    await ctx.evolver.whenIdle()
+    expect(ctx.evolver.getEvaluation(proposal.id)?.treatment.total).toBe(0)
+  })
+
   it('collects a failed tool, exposes human review, and injects only promoted guidance', async () => {
     const { ctx, root, agent, injected } = await mount()
     const { exec, result } = failedExecution(agent)

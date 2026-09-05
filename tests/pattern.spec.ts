@@ -76,6 +76,28 @@ describe('failure-pattern-v1 signature', () => {
 })
 
 describe('proposal admission', () => {
+  it('refreshes a stale runtime projection on its next transaction, not on synchronous reads', async () => {
+    const { root, service } = await fixture()
+    const proposal = required(await service.observeToolFailure(failure('shared runtime failed')))
+    await service.accept(proposal.id)
+    await service.promote(proposal.id)
+    const other = new EvolutionService(
+      await EvolutionStore.open(root),
+      new DeterministicSafetyVerifier(),
+      256,
+    )
+    await service.supersede(proposal.id, 'operator rollback')
+    expect(other.listPromoted()).toHaveLength(1)
+    await other.observeToolResult({
+      sessionId: 'refresh',
+      callId: 'refresh',
+      toolName: 'unused',
+      failed: false,
+    })
+    expect(other.listPromoted()).toHaveLength(0)
+    await other.dispose()
+  })
+
   it('aggregates observations whose wall-clock order differs from commit order', async () => {
     const { root, service } = await fixture()
     vi.useFakeTimers({ toFake: ['Date'] })
@@ -233,8 +255,15 @@ describe('proposal admission', () => {
     await started
     await new Promise<void>((resolve) => setTimeout(resolve, 5))
     const proposal = required(await recovered.observeToolFailure(failure('lease item 2 failed')))
+    let disposed = false
+    const disposal = slow.dispose().then(() => {
+      disposed = true
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(disposed).toBe(false)
     release?.()
     await expect(stale).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    await disposal
 
     expect(proposal).toMatchObject({ generation: 1, patternOccurrence: 2 })
     const snapshot = (await EvolutionStore.open(root)).snapshot()

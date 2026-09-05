@@ -95,7 +95,9 @@ pnpm run build
 pnpm pack --dry-run
 ```
 
-The keyless suite covers signature canonicalization and field boundaries, concurrent admission, generation thresholds, reservation expiry and provider failure, persistence restart and legacy-log replay, corruption rejection, state-transition idempotency, redaction, outcome deduplication, generation-isolated baseline/treatment evaluation, effectiveness verdicts, rollback, Cordis disposal, model-visible promoted-context snapshots, and Web/Headless composition through the real Cordis Loader.
+The keyless suite covers signature canonicalization and field boundaries, concurrent admission, generation thresholds, reservation expiry and provider failure, persistence restart and legacy-log replay, corruption rejection, state-transition idempotency, redaction, outcome deduplication, generation-isolated baseline/treatment evaluation, effectiveness verdicts, rollback, Cordis disposal, model-visible promoted-context snapshots, and minimal Loader composition.
+
+With a built sibling Harness checkout, run `pnpm run test:runtime` for the shipped Headless lifecycle and separate Web startup smoke. It uses real Agents, tools, commands, and persisted Sessions with only a scripted model adapter and harmless probe. No credentials or model network are used. See [runtime evidence and prerequisites](docs/runtime-validation.md) and [the opt-in DeepSeek plan](docs/validation-plan.md).
 
 ## Prior Art and Acknowledgements
 
