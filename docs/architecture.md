@@ -23,19 +23,26 @@ The runtime observes the immutable final `tools/result`, ignores agentless calls
 
 ## Module ownership
 
-| Module          | Responsibility                                                                      |
-| :-------------- | :---------------------------------------------------------------------------------- |
-| `domain.ts`     | Branded identifiers, proposal states, audit vocabulary, service/provider interfaces |
-| `config.ts`     | Loader schema and deployment bounds                                                 |
-| `evaluation.ts` | Pure baseline/treatment verdict calculation                                         |
-| `pattern.ts`    | Pure summary canonicalization and versioned deterministic pattern signatures        |
-| `proposer.ts`   | Deterministic proposal and offline safety-verification providers                    |
-| `store.ts`      | Versioned JSONL validation, replay, transition enforcement, atomic commits          |
-| `service.ts`    | Input normalization, redaction, provider orchestration, lifecycle admission         |
-| `commands.ts`   | Human-only `/evolve` query, review, and promotion operations                        |
-| `runtime.ts`    | Cordis service, command, DSH event, injection, and teardown wiring                  |
+| Module                     | Responsibility                                                                      |
+| :------------------------- | :---------------------------------------------------------------------------------- |
+| `domain.ts`                | Branded identifiers, proposal states, audit vocabulary, service/provider interfaces |
+| `config.ts`                | Loader schema and deployment bounds                                                 |
+| `evaluation.ts`            | Pure baseline/treatment verdict calculation                                         |
+| `pattern.ts`               | Pure summary canonicalization and versioned deterministic pattern signatures        |
+| `proposer.ts`              | Deterministic proposal and offline safety-verification providers                    |
+| `audit-codec.ts`           | Persisted event parsing, validation, and legacy event compatibility                 |
+| `audit-state.ts`           | Internal projection containers and identity lookup helpers                          |
+| `projection.ts`            | Replay and centralized lifecycle/active-generation invariants                       |
+| `admission.ts`             | Pure failure admission plan over the latest locked projection                       |
+| `evaluation-projection.ts` | Baseline selection, treatment updates, and sampling                                 |
+| `store.ts`                 | Public store facade, serialized transactions, file lock, atomic commits             |
+| `service.ts`               | Input normalization, redaction, provider orchestration, lifecycle admission         |
+| `commands.ts`              | Human-only `/evolve` query, review, and promotion operations                        |
+| `runtime.ts`               | Cordis service, command, DSH event, injection, and teardown wiring                  |
 
 These modules remain one package because the current provider and consumers release together. A provider or consumer becomes a separate package only when it gains an independent lifecycle or distribution need.
+
+The dependency direction is store → admission / projection / codec; projection → codec / evaluation-projection; codec and evaluation-projection → pure evaluation and domain helpers. Shared internal state contains no I/O or business orchestration. Admission returns pending event bodies and reservation ownership; the store invokes it only inside the file lock after replaying current disk state. Every event, whether newly committed or replayed, passes the same codec and centralized projection reducer. Public exports, event vocabulary, and lifecycle behavior remain unchanged by this split.
 
 ## Persistence and recovery
 
