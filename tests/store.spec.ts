@@ -26,6 +26,44 @@ function requireProposal(proposal: EvolutionProposal | undefined): EvolutionProp
 }
 
 describe('EvolutionStore', () => {
+  it('redacts verifier evidence and human review reasons before persistence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-evolver-private-review-'))
+    roots.push(root)
+    const secret = 'password=private-review-value https://private.test /Users/private/project'
+    const service = new EvolutionService(
+      await EvolutionStore.open(root),
+      {
+        verify: () => ({ decision: 'passed', verifier: 'review-v1', evidence: secret }),
+      },
+      256,
+    )
+    const first = requireProposal(
+      await service.observeToolFailure({
+        sessionId: 'privacy',
+        toolName: 'bash',
+        errorCode: 'EXIT_1',
+        summary: 'first failure',
+      }),
+    )
+    await service.reject(first.id, secret)
+    const second = requireProposal(
+      await service.observeToolFailure({
+        sessionId: 'privacy',
+        toolName: 'bash',
+        errorCode: 'EXIT_1',
+        summary: 'different failure',
+      }),
+    )
+    await service.accept(second.id)
+    await service.promote(second.id)
+    await service.supersede(second.id, secret)
+    const audit = await readFile(join(root, 'audit-v1.jsonl'), 'utf8')
+    expect(audit).not.toContain('private-review-value')
+    expect(audit).not.toContain('private.test')
+    expect(audit).not.toContain('/Users/private')
+    await expect(EvolutionStore.open(root)).resolves.toBeDefined()
+  })
+
   it('persists a verified proposal and recovers promoted state after restart', async () => {
     const { root, service } = await createService()
     const proposal = requireProposal(

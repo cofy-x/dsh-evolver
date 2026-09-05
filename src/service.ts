@@ -254,9 +254,7 @@ export class EvolutionService implements EvolutionServiceApi {
   /** @inheritdoc */
   reject(id: ProposalId, reason: string): Promise<EvolutionProposal> {
     this.assertAccepting()
-    return this.track(
-      this.store.reject(id, bounded(reason, 'rejection reason', this.maxEvidenceChars)),
-    )
+    return this.track(this.store.reject(id, sanitizeEvidence(reason, this.maxEvidenceChars)))
   }
 
   /** @inheritdoc */
@@ -268,9 +266,7 @@ export class EvolutionService implements EvolutionServiceApi {
   /** @inheritdoc */
   supersede(id: ProposalId, reason: string): Promise<EvolutionProposal> {
     this.assertAccepting()
-    return this.track(
-      this.store.supersede(id, bounded(reason, 'supersede reason', this.maxEvidenceChars)),
-    )
+    return this.track(this.store.supersede(id, sanitizeEvidence(reason, this.maxEvidenceChars)))
   }
 
   /** @inheritdoc */
@@ -313,10 +309,14 @@ export class EvolutionService implements EvolutionServiceApi {
   }
 
   private normalizeVerification(outcome: VerificationOutcome): VerificationOutcome {
+    const decision: unknown = outcome.decision
+    if (decision !== 'passed' && decision !== 'failed') {
+      throw new EvolutionError('verification decision must be passed or failed', 'INVALID_INPUT')
+    }
     return Object.freeze({
-      decision: outcome.decision,
+      decision,
       verifier: safeToken(outcome.verifier, 'verification verifier', 128),
-      evidence: bounded(outcome.evidence, 'verification evidence', this.maxEvidenceChars),
+      evidence: sanitizeEvidence(outcome.evidence, this.maxEvidenceChars),
     })
   }
 

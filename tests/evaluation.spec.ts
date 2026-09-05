@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { evaluateEffectiveness } from '../src/evaluation.ts'
 import { DeterministicSafetyVerifier } from '../src/proposer.ts'
 import { EvolutionService } from '../src/service.ts'
@@ -10,10 +10,40 @@ import { EvolutionStore } from '../src/store.ts'
 const roots: string[] = []
 
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
 describe('effectiveness evaluation', () => {
+  it('does not replace a full sampled baseline with later failure-only audit facts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-evolver-baseline-window-'))
+    roots.push(root)
+    const service = new EvolutionService(
+      await EvolutionStore.open(root),
+      new DeterministicSafetyVerifier(),
+      120,
+      { windowSize: 2, minimumSamples: 1, regressionThreshold: 0.25 },
+    )
+    const result = {
+      sessionId: 'baseline-window',
+      toolName: 'bash',
+      errorCode: 'EXIT_1',
+      summary: 'same failure',
+    }
+    const proposal = await service.observeToolResult({ ...result, callId: 'first', failed: true })
+    if (proposal === undefined) throw new Error('expected proposal')
+    await service.observeToolResult({ ...result, callId: 'success', failed: false })
+    for (const callId of ['repeat-1', 'repeat-2', 'repeat-3']) {
+      await service.observeToolResult({ ...result, callId, failed: true })
+    }
+    await service.accept(proposal.id)
+    await service.promote(proposal.id)
+    expect(service.getEvaluation(proposal.id)?.baseline).toEqual({ total: 2, failed: 1 })
+    expect(
+      (await EvolutionStore.open(root)).snapshot().evaluations.get(proposal.id)?.baseline,
+    ).toEqual({ total: 2, failed: 1 })
+  })
+
   it('classifies deterministic failure-rate deltas without overstating small samples', () => {
     const base = {
       proposalId: '00000000-0000-4000-8000-000000000001' as never,
@@ -139,6 +169,8 @@ describe('effectiveness evaluation', () => {
   })
 
   it('isolates evaluation cohorts across generations of the same pattern', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
     const root = await mkdtemp(join(tmpdir(), 'dsh-evolver-generation-evaluation-'))
     roots.push(root)
     const service = new EvolutionService(

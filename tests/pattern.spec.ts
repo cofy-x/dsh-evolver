@@ -76,6 +76,39 @@ describe('failure-pattern-v1 signature', () => {
 })
 
 describe('proposal admission', () => {
+  it('aggregates observations whose wall-clock order differs from commit order', async () => {
+    const { root, service } = await fixture()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:02.000Z'))
+      await service.observeToolFailure(failure('out of order 1 failed'))
+      vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'))
+      await service.observeToolFailure(failure('out of order 2 failed'))
+      const pattern = (await EvolutionStore.open(root)).snapshot().patterns.values().next().value
+      expect(pattern).toMatchObject({
+        occurrenceCount: 2,
+        firstSeenAt: '2026-01-01T00:00:01.000Z',
+        lastSeenAt: '2026-01-01T00:00:02.000Z',
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects malformed provider decisions without poisoning replay', async () => {
+    const { root, service } = await fixture({
+      verify: () =>
+        ({ decision: 'unknown', verifier: 'bad-v1', evidence: 'invalid decision' }) as never,
+    })
+    await expect(
+      service.observeToolFailure(failure('malformed provider failed')),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+    const state = (await EvolutionStore.open(root)).snapshot()
+    expect(state.proposals.size).toBe(0)
+    expect(state.reservations.size).toBe(0)
+    expect(state.patterns.size).toBe(1)
+  })
+
   it('aggregates matching failures and invokes proposer verification only once', async () => {
     const verify = vi.fn(
       new DeterministicSafetyVerifier().verify.bind(new DeterministicSafetyVerifier()),

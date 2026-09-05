@@ -50,6 +50,8 @@ interface MutableState {
   readonly proposals: Map<ProposalId, EvolutionProposal>
   readonly patterns: Map<FailurePatternId, FailurePattern>
   readonly patternObservationIds: Set<ReturnType<typeof observationId>>
+  readonly observationSequences: Map<ReturnType<typeof observationId>, number>
+  readonly outcomeSequences: Map<ToolOutcomeId, number>
   readonly reservations: Map<FailurePatternId, ProposalGenerationReservation>
   readonly outcomes: Map<ToolOutcomeId, ToolOutcome>
   readonly outcomeKeys: Set<string>
@@ -64,6 +66,8 @@ function emptyState(): MutableState {
     proposals: new Map(),
     patterns: new Map(),
     patternObservationIds: new Set(),
+    observationSequences: new Map(),
+    outcomeSequences: new Map(),
     reservations: new Map(),
     outcomes: new Map(),
     outcomeKeys: new Set(),
@@ -421,12 +425,15 @@ function createPromotionEvaluation(
   if (observation === undefined) {
     throw new EvolutionError('proposal observation is missing', 'CORRUPT_STORE')
   }
-  const baselineOutcomes = [...state.outcomes.values()]
-    .filter(
-      (outcome) =>
-        outcome.toolName === observation.toolName && outcome.observedAt >= proposal.createdAt,
-    )
-    .slice(-policy.windowSize)
+  const eligibleOutcomes = [...state.outcomes.values()].filter(
+    (outcome) =>
+      outcome.toolName === observation.toolName && isBaselineOutcome(state, proposal, outcome),
+  )
+  // Success sampling stops once the window fills; later failures must not evict those successes.
+  const baselineOutcomes =
+    proposal.patternId === undefined
+      ? eligibleOutcomes.slice(-policy.windowSize)
+      : eligibleOutcomes.slice(0, policy.windowSize)
   return Object.freeze(
     evaluateEffectiveness({
       proposalId: id,
@@ -439,6 +446,26 @@ function createPromotionEvaluation(
       treatment: { total: 0, failed: 0 },
       updatedAt: at,
     }),
+  )
+}
+
+/** New pattern generations use audit order, including their triggering outcome immediately before the observation. */
+function isBaselineOutcome(
+  state: MutableState,
+  proposal: EvolutionProposal,
+  outcome: ToolOutcome,
+): boolean {
+  if (proposal.patternId === undefined) return outcome.observedAt >= proposal.createdAt
+  const observationSeq = state.observationSequences.get(proposal.observationId)
+  const outcomeSeq = state.outcomeSequences.get(outcome.id)
+  if (observationSeq === undefined || outcomeSeq === undefined) return false
+  if (outcomeSeq >= observationSeq) return true
+  const observation = state.observations.get(proposal.observationId)
+  return (
+    outcomeSeq === observationSeq - 1 &&
+    outcome.result === 'failed' &&
+    outcome.sessionId === observation?.sessionId &&
+    outcome.observedAt === observation.observedAt
   )
 }
 
@@ -467,7 +494,7 @@ function shouldSampleOutcome(
     if (observation?.toolName !== outcome.toolName) return false
     const collected = [...state.outcomes.values()].filter(
       (candidate) =>
-        candidate.toolName === outcome.toolName && candidate.observedAt >= proposal.createdAt,
+        candidate.toolName === outcome.toolName && isBaselineOutcome(state, proposal, candidate),
     ).length
     return collected < policy.windowSize
   })
@@ -498,6 +525,7 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
         throw new EvolutionError(`duplicate observation ${event.observation.id}`, 'CORRUPT_STORE')
       }
       state.observations.set(event.observation.id, event.observation)
+      state.observationSequences.set(event.observation.id, event.seq)
       break
     case 'failure-pattern-created': {
       if (state.patterns.has(event.pattern.id)) {
@@ -530,8 +558,7 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
         signature.id !== pattern.id ||
         state.patternObservationIds.has(observation.id) ||
         event.occurrence !== pattern.occurrenceCount + 1 ||
-        (pattern.occurrenceCount === 0 && pattern.firstSeenAt !== observation.observedAt) ||
-        observation.observedAt < pattern.lastSeenAt
+        (pattern.occurrenceCount === 0 && pattern.firstSeenAt !== observation.observedAt)
       ) {
         throw new EvolutionError('pattern occurrence is inconsistent', 'CORRUPT_STORE')
       }
@@ -540,7 +567,14 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
         Object.freeze({
           ...pattern,
           occurrenceCount: event.occurrence,
-          lastSeenAt: observation.observedAt,
+          firstSeenAt:
+            observation.observedAt < pattern.firstSeenAt
+              ? observation.observedAt
+              : pattern.firstSeenAt,
+          lastSeenAt:
+            observation.observedAt > pattern.lastSeenAt
+              ? observation.observedAt
+              : pattern.lastSeenAt,
           representativeObservationIds: Object.freeze(
             [...pattern.representativeObservationIds, observation.id].slice(-8),
           ),
@@ -706,6 +740,7 @@ function applyEvent(state: MutableState, event: EvolutionAuditEvent): void {
         throw new EvolutionError('duplicate tool outcome', 'CORRUPT_STORE')
       }
       state.outcomes.set(event.outcome.id, event.outcome)
+      state.outcomeSequences.set(event.outcome.id, event.seq)
       state.outcomeKeys.add(key)
       updateEvaluations(state, event.outcome, event.at)
       break
@@ -843,7 +878,8 @@ export class EvolutionStore {
         },
       ]
       const currentReservation = existing && state.reservations.get(existing.id)
-      const nowMs = Date.parse(observation.observedAt)
+      const reservedAt = new Date().toISOString()
+      const nowMs = Date.parse(reservedAt)
       const reservationExpired =
         currentReservation !== undefined && Date.parse(currentReservation.expiresAt) <= nowMs
       if (reservationExpired) {
@@ -878,7 +914,7 @@ export class EvolutionStore {
           observationId: observation.id,
           generation: (existing?.latestGeneration ?? 0) + 1,
           occurrence,
-          reservedAt: observation.observedAt,
+          reservedAt,
           expiresAt: new Date(nowMs + policy.generationReservationTimeoutMs).toISOString(),
         })
         bodies.push({ kind: 'proposal-generation-reserved', reservation })
@@ -1109,8 +1145,9 @@ export class EvolutionStore {
             at: new Date().toISOString(),
             ...body,
           } as EvolutionAuditEvent
-          applyEvent(committed, event)
-          events.push(event)
+          const validated = eventOf(event, events.length)
+          applyEvent(committed, validated)
+          events.push(validated)
         }
         const nextText = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`
         await writeFileAtomic(this.filename, nextText, { mode: 0o600, dirMode: 0o700 })

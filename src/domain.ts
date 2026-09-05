@@ -253,7 +253,7 @@ export interface EvolutionServiceApi {
    */
   observeToolFailure(input: ToolFailureObservationInput): Promise<EvolutionProposal | undefined>
 
-  /** Record one canonical result and create a proposal as part of the same commit when it failed. */
+  /** Atomically record a failure and admission reservation, then finalize any admitted generation. */
   observeToolResult(input: ToolResultObservationInput): Promise<EvolutionProposal | undefined>
 
   /** @returns proposals, newest first, optionally restricted by status. */
