@@ -22,6 +22,7 @@
     "test:deepseek-offline": "pnpm run build && node scripts/runtime-e2e.mjs --deepseek-dry-run && node scripts/runtime-e2e/faults.mjs",
     "benchmark:offline": "pnpm run build && node scripts/benchmark.mjs",
     "test:benchmark": "pnpm run build && node scripts/benchmark/check.mjs",
+    "test:benchmark-adapter": "pnpm run build && node scripts/benchmark/adapter-check.mjs",
     "build": "node scripts/clean-lib.mjs && tsc -b --force && tsdown --config tsdown.config.ts",
     "prepare": "pnpm run build",
     "prepack": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run build"
@@ -50,6 +51,7 @@
     "cordis.patch.yml",
     "docs/**/*.md",
     "README.md",
+    "README.zh.md",
     "LICENSE"
   ],
   "license": "MIT",

@@ -2,6 +2,38 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { TASKS, createWorld, grade, scriptFor, prompt } from './tasks.mjs'
 import { schedule, summarize } from './report.mjs'
+import { reserve } from './transport.mjs'
+
+test('pilot wire ledger spans all six runs, rejects extensions and corrupted state', () => {
+  const wire = {
+    model: 'deepseek-v4-flash',
+    stream: true,
+    max_tokens: 512,
+    thinking: { type: 'disabled' },
+    messages: [{ role: 'user', content: 'probe' }],
+    tools: [{ type: 'function', function: { name: 'bench_apply' } }],
+  }
+  let state = { requests: 0, input: 0, output: 0, runs: {} }
+  const run = 'pilot-format-1:baseline'
+  for (const patch of [
+    { max_tokens: 513 },
+    { model: 'other' },
+    { extra: true },
+    { messages: [{ content: 'x'.repeat(4096) }] },
+    { tools: [] },
+  ])
+    assert.throws(() => reserve(state, JSON.stringify({ ...wire, ...patch }), wire.model, run))
+  assert.throws(() => reserve({ ...state, requests: 1 }, JSON.stringify(wire), wire.model, run))
+  for (const task of TASKS.filter((t) => t.split === 'pilot'))
+    for (const arm of ['baseline', 'treatment']) {
+      const key = `${task.id}:${arm}`
+      for (let i = 0; i < 4; i++)
+        state = reserve(JSON.parse(JSON.stringify(state)), JSON.stringify(wire), wire.model, key)
+      assert.throws(() => reserve(state, JSON.stringify(wire), wire.model, key))
+    }
+  assert.equal(state.requests, 24)
+  assert.equal(state.output, 12288)
+})
 
 test('partitions are disjoint and the independent oracle rejects claimed or partial completion', () => {
   assert.equal(new Set(TASKS.map((task) => task.id)).size, TASKS.length)

@@ -1,7 +1,7 @@
-/** Credential-free paired experiment controller. Live execution is deliberately not implemented. */
+/** Isolated paired experiment controller; live transport requires explicit paid opt-in. */
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,17 +11,33 @@ import { BOUNDS, hash, schedule, summarize } from './benchmark/report.mjs'
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/benchmark.mjs [--harness=PATH] [--split=development|pilot|heldout] [--seed=INTEGER] [--baseline=solve|repeat|claim|overhead|budget|infra|hang|leak] [--treatment=...] [--run-timeout-ms=1..45000]\nOffline only. Three pilot tasks by default. All child logs and temporary state are removed; safe JSON report goes to stdout. Script overrides test scoring, NOT strategy effectiveness.',
+    'Usage: node scripts/benchmark.mjs [--harness=PATH] [--split=development|pilot|heldout] [--seed=INTEGER] [--baseline=solve|repeat|claim|overhead|budget|infra|hang|leak] [--treatment=...] [--run-timeout-ms=1..45000] [--adapter=scripted|deepseek-fixture|deepseek-live] [--model=deepseek-v4-flash] [--allow-paid=yes]\nDefault offline. DeepSeek modes require the pilot split and prohibit script overrides. Live requires explicit paid opt-in and DEEPSEEK_API_KEY; only the official endpoint is allowed. Safe JSON only; temporary state is removed.',
   )
   process.exit(0)
 }
 const options = {}
 for (const arg of args) {
-  const match = /^--(harness|split|seed|baseline|treatment|run-timeout-ms)=(.+)$/.exec(arg)
-  assert.ok(match && !(match[1] in options), 'unknown or duplicate argument; live is unsupported')
+  const match =
+    /^--(harness|split|seed|baseline|treatment|run-timeout-ms|adapter|model|allow-paid|fixture-fault)=(.+)$/.exec(
+      arg,
+    )
+  assert.ok(match && !(match[1] in options), 'unknown or duplicate argument')
   options[match[1]] = match[2]
 }
 const split = options.split ?? 'pilot'
+const adapter = options.adapter ?? 'scripted'
+assert.ok(['scripted', 'deepseek-fixture', 'deepseek-live'].includes(adapter))
+const live = adapter === 'deepseek-live'
+const transport = adapter !== 'scripted'
+const fault = options['fixture-fault'] ?? 'none'
+assert.ok(['none', 'rate-limit', 'hang'].includes(fault))
+if (options['fixture-fault']) assert.equal(adapter, 'deepseek-fixture')
+const model = options.model ?? 'deepseek-v4-flash'
+assert.ok(/^deepseek-[a-z0-9-]+$/.test(model))
+if (transport) assert.ok(split === 'pilot' && !options.baseline && !options.treatment)
+if (live) assert.equal(options['allow-paid'], 'yes', 'live requires --allow-paid=yes')
+else assert.equal(options['allow-paid'], undefined)
+// Do not inspect credentials unless all command-line validation has passed.
 assert.ok(['development', 'pilot', 'heldout'].includes(split))
 const seed = Number(options.seed ?? 17)
 assert.ok(Number.isSafeInteger(seed) && seed >= 0)
@@ -34,7 +50,13 @@ assert.ok(
   ),
 )
 const harness = resolve(options.harness ?? '../deepseek-harness')
+const apiKey = live ? process.env.DEEPSEEK_API_KEY : 'fixture-not-a-secret'
+if (live) assert.ok(apiKey && !/[\r\n]/.test(apiKey), 'DEEPSEEK_API_KEY is required')
 const root = await mkdtemp(join(tmpdir(), 'dsh-evolver-benchmark-'))
+const ledgerPath = join(root, 'ledger.json')
+await writeFile(ledgerPath, JSON.stringify({ requests: 0, input: 0, output: 0, runs: {} }), {
+  mode: 0o600,
+})
 const tasks = TASKS.filter((task) => task.split === split)
 const plan = schedule(tasks, seed)
 const rows = []
@@ -50,7 +72,9 @@ const implementationFiles = [
   'scripts/benchmark/driver.mjs',
   'scripts/benchmark/tasks.mjs',
   'scripts/benchmark/report.mjs',
+  'scripts/benchmark/transport.mjs',
   'scripts/runtime-e2e/host.mjs',
+  'scripts/runtime-e2e/budget.mjs',
   'src/proposer.ts',
 ]
 const readImplementation = () =>
@@ -83,7 +107,20 @@ try {
     const outcome = await new Promise((resolveResult) => {
       const child = spawn(
         process.execPath,
-        [driver, harness, pairRoot, run.taskId, run.arm, behaviors[run.arm], resultFile],
+        [
+          driver,
+          harness,
+          pairRoot,
+          run.taskId,
+          run.arm,
+          behaviors[run.arm],
+          resultFile,
+          adapter,
+          model,
+          ledgerPath,
+          String(Math.min(deadline, Date.now() + runMs)),
+          fault,
+        ],
         {
           cwd: workspace,
           env: {
@@ -93,6 +130,8 @@ try {
             XDG_CONFIG_HOME: join(home, 'config'),
             XDG_CACHE_HOME: join(home, 'cache'),
             DSH_TELEMETRY_DISABLED: '1',
+            ...(transport ? { DEEPSEEK_API_KEY: apiKey } : {}),
+            ...(live ? { EVOLVER_LIVE_AUTHORIZED: 'yes' } : {}),
           },
           stdio: 'ignore',
         },
@@ -133,6 +172,7 @@ try {
         seedHash: checkpoint.seedHash,
         guidanceHash: checkpoint.guidanceHash,
         exposureSeen: checkpoint.exposureSeen,
+        wireFirstRequestHash: checkpoint.wireFirstRequestHash,
       })
     } else if (outcome.code !== 0 || outcome.spawnFailed)
       rows.push({ ...empty, status: 'infrastructure' })
@@ -151,6 +191,7 @@ try {
   for (const task of tasks) {
     const pair = rows.filter((row) => row.taskId === task.id)
     const keys = ['firstRequestHash', 'initialStateHash', 'seedHash', 'guidanceHash']
+    if (transport) keys.push('wireFirstRequestHash')
     const intact =
       pair.every((row) => keys.every((key) => typeof row[key] === 'string')) &&
       keys.every((key) => pair[0][key] === pair[1][key])
@@ -172,10 +213,18 @@ try {
     }
   const report = {
     version: VERSION,
-    evidence: 'offline-harness-only',
+    evidence: live
+      ? 'live-adapter-pilot'
+      : transport
+        ? 'offline-real-adapter'
+        : 'offline-harness-only',
+    adapter,
+    model: transport ? model : null,
+    wireReservations: transport ? JSON.parse(await readFile(ledgerPath, 'utf8')) : null,
     split,
     seed,
-    behaviors,
+    behaviors: transport ? null : behaviors,
+    fixtureFault: fault,
     limits: {
       ...BOUNDS,
       runMs,
@@ -186,7 +235,7 @@ try {
     fixtureHash: hash(tasks),
     implementationHash,
     implementationUnchanged: unchanged,
-    planHash: hash({ tasks, plan, behaviors, bounds: BOUNDS, runMs }),
+    planHash: hash({ tasks, plan, behaviors, bounds: BOUNDS, runMs, adapter, model, fault }),
     executionOrder: plan,
     node: process.version,
     productSha: revision(product),
