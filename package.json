@@ -17,8 +17,9 @@
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.vitest.json --pretty false",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/runtime-e2e/budget.test.mjs",
     "test:runtime": "pnpm run build && node scripts/runtime-e2e.mjs",
+    "test:deepseek-offline": "pnpm run build && node scripts/runtime-e2e.mjs --deepseek-dry-run && node scripts/runtime-e2e/faults.mjs",
     "build": "node scripts/clean-lib.mjs && tsc -b --force && tsdown --config tsdown.config.ts",
     "prepare": "pnpm run build",
     "prepack": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run build"

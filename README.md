@@ -99,6 +99,8 @@ The keyless suite covers signature canonicalization and field boundaries, concur
 
 With a built sibling Harness checkout, run `pnpm run test:runtime` for the shipped Headless lifecycle and separate Web startup smoke. It uses real Agents, tools, commands, and persisted Sessions with only a scripted model adapter and harmless probe. No credentials or model network are used. See [runtime evidence and prerequisites](docs/runtime-validation.md) and [the opt-in DeepSeek plan](docs/validation-plan.md).
 
+Run `pnpm run test:deepseek-offline` to exercise the real DeepSeek adapter against local SSE with shared budgets and negative transport cases. The [opt-in smoke guide](docs/deepseek-smoke.md) documents the separate paid-authorization flags and remaining live-model verification boundary.
+
 ## Prior Art and Acknowledgements
 
 `dsh-evolver` is an independent, DSH-native implementation of auditable agent self-evolution. Its design is inspired in part by [EvoMap/evolver](https://github.com/EvoMap/evolver) and broader experience-driven agent-evolution research. It is not affiliated with or endorsed by EvoMap. No EvoMap source code, prompts, private formats, or protocol compatibility claims are used by this implementation.
