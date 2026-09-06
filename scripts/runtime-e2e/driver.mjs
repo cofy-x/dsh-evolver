@@ -1,6 +1,6 @@
 /** Public-package-only shipped profile integration. No Harness test helpers or private source imports. */
 import assert from 'node:assert/strict'
-import { createRequire, registerHooks, syncBuiltinESMExports } from 'node:module'
+import { syncBuiltinESMExports } from 'node:module'
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs'
 import { writeFile, readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -10,6 +10,7 @@ import http from 'node:http'
 import https from 'node:https'
 import tls from 'node:tls'
 import { SmokeBudget, LIMITS, checkDestination, fixtureResponse } from './budget.mjs'
+import { installHostResolution, ISOLATED_ENTRIES } from './host.mjs'
 
 const [harness, profileName, root, phase, mode = 'scripted', selectedModel, deadlineText, fault] =
   process.argv.slice(2)
@@ -33,47 +34,7 @@ let wireRequests = 0
 let currentInputReservation = 0
 let fatal = false
 const usage = { input: 0, output: 0, reports: 0 }
-const manifests = new Map()
-function discover(dir) {
-  const manifest = join(dir, 'package.json')
-  if (existsSync(manifest)) {
-    const pkg = JSON.parse(readFileSync(manifest, 'utf8'))
-    if (pkg.name?.startsWith('@deepseek-ai/')) manifests.set(pkg.name, manifest)
-    return
-  }
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (
-      entry.isDirectory() &&
-      !entry.name.startsWith('.') &&
-      !['node_modules', 'lib', 'dist'].includes(entry.name)
-    )
-      discover(join(dir, entry.name))
-  }
-}
-discover(join(harness, 'packages'))
-discover(join(harness, 'vendor'))
-discover(join(harness, 'apps'))
-// Route every DSH/Cordis import, including Evolver's peers, through one checkout's public exports.
-let resolvingPublicExport = false
-registerHooks({
-  resolve(specifier, context, next) {
-    if (!resolvingPublicExport && specifier.startsWith('@deepseek-ai/')) {
-      const name = specifier.split('/').slice(0, 2).join('/')
-      const manifest = manifests.get(name)
-      if (!manifest && name.startsWith('@deepseek-ai/node-addon-')) return next(specifier, context)
-      assert.ok(manifest, `host package missing: ${name}`)
-      let resolved
-      resolvingPublicExport = true
-      try {
-        resolved = createRequire(manifest).resolve(specifier)
-      } finally {
-        resolvingPublicExport = false
-      }
-      return next(resolved, context)
-    }
-    return next(specifier, context)
-  },
-})
+installHostResolution(harness)
 let networkAttempts = 0
 function denyNetwork() {
   networkAttempts++
@@ -132,21 +93,7 @@ const profile = loadProfile('evolver-e2e', profileName, anchor, process.env.DSH_
 })
 const basePatches = profile.layers.flatMap((layer) => layer.patches)
 const entries = composeEntries([basePatches])
-const disabled = new Set([
-  'llm-deepseek',
-  'llm-pi-ai',
-  'session-title-llm',
-  'session-telemetry-otel',
-  'llm-retry',
-  'skill-filesystem',
-  'agent-instructions',
-  'web-search-deepseek',
-  'web-fetch-http',
-  'plan-mode',
-  // Do not attach Session logs or local package inventory to external requests.
-  'session-log-deepseek',
-  'plugin-package-inventory-deepseek',
-])
+const disabled = new Set(ISOLATED_ENTRIES)
 if (transport) disabled.delete('llm-deepseek')
 // Keep real runtime services and profile-specific UI/driver rows; hide all production tools.
 for (const entry of entries) if (entry.id?.startsWith('tool-')) disabled.add(entry.id)

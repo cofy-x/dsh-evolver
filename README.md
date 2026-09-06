@@ -101,6 +101,8 @@ With a built sibling Harness checkout, run `pnpm run test:runtime` for the shipp
 
 Run `pnpm run test:deepseek-offline` to exercise the real DeepSeek adapter against local SSE with shared budgets and negative transport cases. The [opt-in smoke guide](docs/deepseek-smoke.md) documents the separate paid-authorization flags and remaining live-model verification boundary.
 
+Run `pnpm run benchmark:offline` for paired recovery-task measurement with an independent state grader, or `pnpm run test:benchmark` for scoring/integrity regressions. This is a scripted, credential-free harness check, not evidence of strategy effectiveness. See [paired benchmark design and boundaries](docs/paired-benchmark.md).
+
 ## Prior Art and Acknowledgements
 
 `dsh-evolver` is an independent, DSH-native implementation of auditable agent self-evolution. Its design is inspired in part by [EvoMap/evolver](https://github.com/EvoMap/evolver) and broader experience-driven agent-evolution research. It is not affiliated with or endorsed by EvoMap. No EvoMap source code, prompts, private formats, or protocol compatibility claims are used by this implementation.

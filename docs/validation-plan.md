@@ -22,7 +22,7 @@ The scripted run proves tool execution, collection, review, injection, and measu
 
 ## Priority order
 
-1. Use the passing live smoke as the wiring baseline; design a held-out paired benchmark before claiming task-effectiveness gains. Further paid runs require their own agreed budget.
+1. The [paired benchmark's offline task/scoring runner](paired-benchmark.md) is implemented. Next add the separately authorized, experiment-wide budgeted real-adapter pilot; do not interpret scripted results as task-effectiveness gains. Further paid runs require their own agreed budget.
 2. Define fresh read/injection semantics for multiple runtimes and awaitable exposure accounting before adding an independent CLI or worker.
 3. Add cancellation and deadlines to the provider contract before any external verifier or LLM proposer.
 4. Measure replay/write latency against realistic failure logs; select persistence changes from those results.
