@@ -1,6 +1,6 @@
 # Local validation and development priorities
 
-The credential-free runtime experiment is implemented in `scripts/runtime-e2e.mjs`; see [runtime evidence and boundaries](runtime-validation.md) for executed coverage, prerequisites, and remaining limitations. The older Vitest composition fixtures still mount a minimal tree with two labels and are not shipped-profile evidence. No test in this stage calls a live DeepSeek model.
+The credential-free runtime experiment is implemented in `scripts/runtime-e2e.mjs`; see [runtime evidence and boundaries](runtime-validation.md) for executed coverage, prerequisites, and remaining limitations. The older Vitest composition fixtures still mount a minimal tree with two labels and are not shipped-profile evidence. Credential-free tests never call a live model; the separately authorized [live smoke result](deepseek-smoke.md#authorized-live-result--2026-09-06) records the successful 2026-09-06 run.
 
 ## Keyless runtime scenario (implemented)
 
@@ -10,7 +10,7 @@ Run a deterministic sequence: two tool failures with equivalent redacted summari
 
 ## Opt-in DeepSeek smoke
 
-The budgeted runner and real-adapter offline checks are now implemented; see [the smoke guide](deepseek-smoke.md) for authoritative entry points, actual controls, and evidence. The text below describes the experiment's intent; input limits are byte-based admission estimates, not verified tokenizer counts. Live execution remains unauthorized and untested.
+The budgeted runner, real-adapter offline checks, and one authorized live run are complete; see [the smoke guide](deepseek-smoke.md) for entry points, controls, and evidence. Input limits remain byte-based admission estimates, not verified tokenizer counts. Future paid runs still require explicit authorization; the successful smoke is not evidence of strategy effectiveness.
 
 After the keyless runtime experiment passes, replace only the scripted adapter with the DSH DeepSeek adapter. Resolve `DEEPSEEK_API_KEY` through the existing DSH credential/environment seam, without printing it or copying it into a profile file. Select an explicitly configured model supported by the installed adapter. Use synthetic tasks and the harmless test tool only, with no shell, source repository access, background jobs, or external tools.
 
@@ -22,7 +22,7 @@ The scripted run proves tool execution, collection, review, injection, and measu
 
 ## Priority order
 
-1. Confirm the selected model, input-token estimate assumptions, and budget, then obtain authorization for the bounded live smoke using the implemented runner.
+1. Use the passing live smoke as the wiring baseline; design a held-out paired benchmark before claiming task-effectiveness gains. Further paid runs require their own agreed budget.
 2. Define fresh read/injection semantics for multiple runtimes and awaitable exposure accounting before adding an independent CLI or worker.
 3. Add cancellation and deadlines to the provider contract before any external verifier or LLM proposer.
 4. Measure replay/write latency against realistic failure logs; select persistence changes from those results.
