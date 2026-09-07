@@ -29,8 +29,6 @@ Total: 24 paid requests, 24 usage reports, **16,029 input tokens including cache
 
 All pairs passed first adapter-options and serialized-wire equality after removing only promoted guidance, as well as initial-state, accepted-seed, and guidance identity. Baseline had no guidance; treatment had guidance in both actual requests and canonical Session history. Every arm completed audit privacy and tool-disposal assertions (`validationCompleted=true`), including credential absence from Evolver audit. No forbidden network attempts occurred; the permitted official requests are counted separately above. Temporary Sessions, journals and workspaces were removed after child exit. No raw tool arguments, model output, or credentials were retained in the safe report.
 
-Before live execution, 50 Vitest tests, 10 Node unit checks, all eight original benchmark regression scenarios, real Headless lifecycle/recovery, shipped Web startup, the existing DeepSeek offline lifecycle/fault cases, and the new real-adapter fixture/429/hang checks passed. Format, lint, typecheck, build, dry-run packaging, built ESM imports and diff checks also passed. The new fixture confirms that one sequential wire ledger spans six child processes; its usage numbers are synthetic, not live evidence.
-
 ## Interpretation and next decision
 
 Fewer tool failures did not imply task completion: several arms had zero tool failures yet failed the exact-state goal. Aggregate counters alone cannot distinguish excessive inspection, incomplete writes, incorrect values, or other model choices. Raw transcripts were deliberately not retained, so this run does not support a more specific root-cause claim. Do not silently increase the budget or alter the task contract and call the rerun this same experiment.

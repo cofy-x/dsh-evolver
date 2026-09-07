@@ -1,5 +1,7 @@
 # DSH Evolver architecture
 
+[English](architecture.md) | [简体中文](architecture.zh.md) | [Documentation map](README.md)
+
 DSH Evolver is a proposal lifecycle plugin, not an Agent implementation or autonomous code editor. DSH remains authoritative for Agents, model requests, tools, commands, canonical Session history, permissions, and credentials.
 
 ## Vertical MVP
@@ -42,7 +44,7 @@ The runtime observes the immutable final `tools/result`, ignores agentless calls
 
 These modules remain one package because the current provider and consumers release together. A provider or consumer becomes a separate package only when it gains an independent lifecycle or distribution need.
 
-The dependency direction is store → admission / projection / codec; projection → codec / evaluation-projection; codec and evaluation-projection → pure evaluation and domain helpers. Shared internal state contains no I/O or business orchestration. Admission returns pending event bodies and reservation ownership; the store invokes it only inside the file lock after replaying current disk state. Every event, whether newly committed or replayed, passes the same codec and centralized projection reducer. Public exports, event vocabulary, and lifecycle behavior remain unchanged by this split.
+The dependency direction is store → admission / projection / codec; projection → codec / evaluation-projection; codec and evaluation-projection → pure evaluation and domain helpers. Shared internal state contains no I/O or business orchestration. Admission returns pending event bodies and reservation ownership; the store invokes it only inside the file lock after replaying current disk state. Every event, whether newly committed or replayed, passes the same codec and centralized projection reducer.
 
 ## Persistence and recovery
 
@@ -70,7 +72,7 @@ After both cohorts reach `minimumEvaluationSamples`, the evaluator compares fail
 
 ## Model experience
 
-Before promotion, the plugin adds no model tokens and changes no tool schema. On a later `agent/session-start`, up to the configured number of promoted strategies are combined into one plugin-sourced instruction message and queued with `agent.inject()`. Only after synchronous injection succeeds does the runtime queue exposure persistence, so rejected injection cannot create false exposure. The existing Agent loop commits that message as canonical Session input before it reaches a model request. The injected text is bounded by the maximum strategy count and fixed-size proposal guidance. Exposure persistence and Session commitment are not a shared durability transaction; see [tested failure boundaries](runtime-validation.md).
+Before promotion, the plugin adds no model tokens and changes no tool schema. On a later `agent/session-start`, up to the configured number of promoted strategies are combined into one plugin-sourced instruction message and queued with `agent.inject()`. Only after synchronous injection succeeds does the runtime queue exposure persistence, so rejected injection cannot create false exposure. The existing Agent loop commits that message as canonical Session input before it reaches a model request. The injected text is bounded by the maximum strategy count and fixed-size proposal guidance. Exposure persistence and Session commitment are not a shared durability transaction; see the operational limits below.
 
 ## Security invariants
 
@@ -84,7 +86,7 @@ Before promotion, the plugin adds no model tokens and changes no tool schema. On
 
 ## Deferred adapters
 
-`dsh-as-a-verifier` can later implement the verification provider after a bounded candidate/evidence contract is agreed. `dsh-automation` can schedule analysis or replay Runs without moving its queue, leases, or recovery state into this repository. Skill materialization, Console/Trajectory projections, LLM proposal providers, benchmarks, shared networks, and isolated worktree code evolution remain outside the MVP.
+`dsh-as-a-verifier` can later implement the verification provider after a bounded candidate/evidence contract is agreed. `dsh-automation` can schedule analysis or replay Runs without moving its queue, leases, or recovery state into this repository. The repository contains an external paired benchmark harness with credential-free defaults and a separately authorized real-adapter pilot; product-integrated effectiveness measurement remains outside the MVP. Its transport ledger is test-only and sequential, not a new product persistence protocol. Skill materialization, Console/Trajectory projections, LLM proposal providers, shared networks, and isolated worktree code evolution also remain deferred.
 
 ## Operational limits and next validation
 
@@ -92,4 +94,4 @@ Use one active runtime per data directory for now. Write admission is cross-proc
 
 Reservation expiry allows another occurrence to reclaim ownership; it does not cancel the original provider call. A provider that never settles can still delay disposal indefinitely. External providers therefore require deadlines, cooperative cancellation, stale-result fencing, and a documented disposal budget before being enabled. The current deterministic provider performs no external work.
 
-Whole-log replay and replacement, unbounded failure history, and repeated evaluation scans are appropriate only for the experimental data volume. Measure latency and log size under representative load before choosing SQLite or snapshot/compaction work. Neither backend choice improves proposal quality: the current fixed diagnostic template and structural verifier do not establish that a strategy improves task success. See [the local validation plan](validation-plan.md) for the next bounded experiment.
+Whole-log replay and replacement, unbounded failure history, and repeated evaluation scans are appropriate only for the experimental data volume. Measure latency and log size under representative load before choosing SQLite or snapshot/compaction work. Neither backend choice improves proposal quality: the current fixed diagnostic template and structural verifier do not establish that a strategy improves task success. See the [paired benchmark](paired-benchmark.md) for the next task-effectiveness experiment.

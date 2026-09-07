@@ -29,8 +29,6 @@
 
 全部 pair 通过首次 adapter options 和真实 wire 比较（仅移除 promoted guidance），以及初始状态、accepted seed、guidance 一致性检查。Baseline 不包含指导，treatment 在真实请求和规范 Session history 中包含指导。每个 arm 都完成 audit 隐私和工具销毁断言（`validationCompleted=true`），包括 Evolver audit 不含凭据。没有被禁止的网络尝试，获准官方请求另计如上。子进程退出后清理临时 Session、journal 和 workspace。安全报告不保留原始工具参数、模型输出或凭据。
 
-Live 前通过 50 项 Vitest、10 项 Node 单元检查、全部八种原 benchmark 回归、真实 Headless 生命周期/恢复、随附 Web 启动、既有 DeepSeek 离线生命周期/故障场景，以及新真实 adapter fixture/429/hang 检查。格式、lint、typecheck、build、打包 dry-run、构建后 ESM import 和 diff 检查也通过。新 fixture 证明同一串行 wire 账本覆盖六个子进程；其 usage 是合成值，不是 live 证据。
-
 ## 解释和下一步决策
 
 工具失败更少不代表任务完成：部分 arm 没有工具失败，却未达到精确状态目标。聚合计数无法区分过度 inspect、写入不完整、值错误或其他模型选择。原始 transcript 有意不保留，因此本轮不能支持更具体根因。不要静默扩大预算或修改任务协议后，把重跑称为同一实验。

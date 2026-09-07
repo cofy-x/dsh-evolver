@@ -25,18 +25,18 @@ Use Node.js 24 or newer for development, pnpm 11, strict TypeScript, and ESM. Va
 
 Keep Markdown prose paragraphs on one physical line. Public interfaces and non-obvious modules require accurate JSDoc. Do not commit build output, dependencies, local state, credentials, private endpoints, or absolute developer paths.
 
+English documents are authoritative. When an English document with a `.zh.md` counterpart changes materially, update the Chinese counterpart in the same change. Keep commands, identifiers, limits, commit SHAs, and safety boundaries identical across languages; do not maintain independent roadmaps in translations. Use [`docs/README.md`](docs/README.md) as the documentation map instead of duplicating status across files.
+
+## Context and documentation
+
+Start with README, then load only the relevant page from [the documentation map](docs/README.md). Keep durable behavior and constraints in architecture, executable procedures in runbooks, and current facts in code/configuration. Read live Git state before interpreting evidence.
+
+Do not duplicate module implementations, completed plans, passing-test counts, local build-repair logs, or speculative adapter lists across documents. Preserve concise negative findings and decision-relevant experimental provenance. Update existing pages before adding new ones; keep English and Chinese claims aligned.
+
 ## Verification and delivery
 
-Run before commit:
+Use the [verification guide](docs/runtime-validation.md) to select standard and boundary-specific gates. Documentation-only changes require formatting, link checks, and staged/unstaged diff review. Record what was actually verified.
 
-```sh
-pnpm run format:check
-pnpm run lint
-pnpm run typecheck
-pnpm test
-pnpm run build
-pnpm pack --dry-run
-git diff --check
-```
+The current verifier is an offline structural safety check; it is not `dsh-as-a-verifier` integration or proof of task effectiveness. Paid smoke and benchmark runs require explicit model and aggregate-budget authorization and the documented opt-in controls. Keep credentials and raw provider output out of reports.
 
-Product-visible changes require a real Loader composition test. Model-visible guidance requires keyless snapshot evidence. Persistence changes require restart, corruption, transition, and idempotency tests. Local commits are allowed after gates pass; remote pushes use the Hangar `devbox-x` workflow. Do not create releases, tags, or npm publications without explicit authorization.
+Local commits are allowed after applicable gates pass. Remote pushes use Hangar's `devbox-x` workflow. Releases, tags and npm publication require explicit authorization.

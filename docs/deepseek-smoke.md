@@ -1,6 +1,8 @@
 # Opt-in DeepSeek smoke runner
 
-The runner supports both offline adapter checks and explicitly authorized live execution. The first authorized live lifecycle and separate recovery passed on 2026-09-06; see the recorded evidence below. Offline mode still exercises the shipped DeepSeek adapter, wire serialization, SSE parsing, and usage mapping without real credentials or network.
+[English](deepseek-smoke.md) | [简体中文](deepseek-smoke.zh.md) | [Documentation map](README.md)
+
+The runner supports both offline adapter checks and explicitly authorized live execution. Offline mode still exercises the shipped DeepSeek adapter, wire serialization, SSE parsing, and usage mapping without real credentials or network.
 
 ## Entry points and prerequisites
 
@@ -28,22 +30,8 @@ Only an exact POST to `https://api.deepseek.com/chat/completions` is accepted; c
 
 The parent enforces 120 seconds total across startup, scenario, recovery, and teardown; `--timeout-ms` can only lower it. Native fetch also receives the Agent signal plus the earlier request/run deadline. A stuck or abort-ignoring child is killed and classified as failure, with its temporary state removed. Killing a process is not proof that an external provider stopped work or stopped billing; Evolver's provider cancellation/disposal contract remains unchanged.
 
-## Executed evidence and remaining verification
+## Acceptance and interpretation
 
-On Node `v24.16.0`, Harness `0.1.3-alpha.1` source SHA `d347e703908d0406b7a7ef80e3a0e594d86b2215`, the real-adapter offline lifecycle used 12 requests and restart used 1. Cumulative reservations were 27,540 input units and 6,656 output tokens. Fixture-reported usage was 1,300 input and 130 output tokens, intentionally synthetic and not a measured cost. HTTP 429 produced exactly one reservation with no retry. An unending fake transport produced one reservation, hit the lowered four-second parent deadline, and failed with bounded termination. Unit checks cover reservation restoration, rejected requests, Unicode size, endpoint restrictions, and authorization/privacy CLI failures.
+A new run must pass the shared lifecycle, canonical/wire guidance, recovery, privacy and disposal assertions. Offline fixtures validate serialization, SSE, budgets and fault handling; an authorized live smoke additionally checks authentication, endpoint/model compatibility and tool-protocol adherence for that run. Retain exact revisions and a safe summary without accumulating per-run request and token inventories here.
 
-## Authorized live result — 2026-09-06
-
-The user explicitly authorized using the existing environment configuration and paid live smoke. Only `DEEPSEEK_API_KEY` was present among DeepSeek environment settings; no model or endpoint override was configured. The run selected `deepseek-v4-flash` at the fixed official endpoint with thinking disabled, zero retries, and unchanged budgets. Credential values and raw child output were not reported or retained. One invocation succeeded; no paid rerun was necessary.
-
-| Phase                     | Requests | Reported input tokens (including cache) | Reported output tokens |
-| :------------------------ | -------: | --------------------------------------: | ---------------------: |
-| Full lifecycle            |       12 |                                   7,062 |                    361 |
-| Separate-process recovery |        1 |                                     450 |                      1 |
-| Total                     |       13 |                                   7,512 |                    362 |
-
-Both phases reported `passed: true`. Cumulative admission reservations were 27,976 input units and 6,656 output tokens, below the unchanged 32,768/8,192 limits. The run completed within the 120-second deadline and exited normally after teardown. Usage is provider-reported, not a billing invoice; no monetary cost is inferred from these totals.
-
-Tested product SHA: `d9de4ed6f2a571737d6fdde1633a7d77f5346e79`, clean worktree. Harness SHA: `d347e703908d0406b7a7ef80e3a0e594d86b2215`, clean worktree, version `0.1.3-alpha.1`; Node `v24.16.0` on macOS. This documentation-only follow-up records those tested revisions rather than claiming its own commit was the paid test target.
-
-All shared scenario assertions passed against real model requests: exact synthetic tool failures and aggregation; pending/accepted guidance exclusion; command-driven promotion and canonical/serialized guidance; exposure-only treatment; rollback; frozen evaluation and canonical Session recovery; audit sentinel exclusion; and disposal. This establishes successful authentication, TLS/endpoint/model compatibility, real streaming/tool-call formatting, and tool-following for this synthetic run. It does not prove remote cancellation, an authoritative preflight tokenizer bound, or that strategies improve task success. Effectiveness still requires a separate held-out paired benchmark.
+A smoke does not establish improved task success. See the [paired benchmark](paired-benchmark.md) for the experiment contract and retained negative result.
