@@ -27,6 +27,12 @@ git diff --cached --check
 
 Persistence changes also require restart, corrupt/legacy replay, transitions, idempotency, and relevant admission-race tests. Model-visible changes require canonical Session and actual-request assertions. Scripted fixtures establish wiring and grading; task-effectiveness claims need a separately designed experiment.
 
+## Dependency upgrade policy
+
+`package.json` is the compatibility source of truth: pin all DSH development packages, including their peer-service closure, to one exact release. Limit DSH peer ranges to that baseline's patch release line, explicitly admitting the tested prerelease and excluding the next line. Do not infer compatibility across pre-1.0 releases. Cordis and Schemastery keep their independent ranges; Evolver's own version follows Evolver changes, not the host's release number.
+
+For an upgrade, update all DSH development pins and peer ranges together, run `pnpm install`, and review the lockfile and any exact-version `minimumReleaseAgeExclude` entries; do not disable release-age protection globally. Run `pnpm run check:compatibility` and `pnpm peers check`, the standard gates, and all offline runtime, adapter, benchmark and experience gates (`pnpm run test:experience`) before accepting a new line. The compatibility check is also part of `pnpm test`; integration launchers reject unsupported or mixed host releases before boot. These commands write local dependencies/builds and temporary test evidence, not remote releases, and need no provider credentials. Preserve historical experiment versions and results; a dependency upgrade does not authorize paid reruns.
+
 ## Prepare the host
 
 Integration commands build Evolver and use the sibling `../deepseek-harness`. Install that checkout's dependencies and build its public exports and Web assets using its own development instructions. Missing or stale host builds fail; there is no fixture fallback. Resolve DSH/Cordis services consistently through host public exports, without private source imports or mixed published/workspace service versions.

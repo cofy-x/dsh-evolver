@@ -220,7 +220,7 @@ async function canonical(agent) {
   await ctx.sessions.flush(agent.session)
   const saved = await ctx.sessionPersistence.open(agent.session.id, 'read')
   try {
-    const events = await saved.read()
+    const { events } = await saved.read()
     const instructions = events.filter(
       (e) => e.type === 'user/message' && e.data.source?.plugin === 'dsh-evolver',
     )

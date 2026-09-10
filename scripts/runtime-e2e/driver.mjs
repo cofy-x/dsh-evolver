@@ -314,7 +314,9 @@ try {
     )
     const persisted = await ctx.sessionPersistence.open(SessionId('evolver-treatment'), 'read')
     try {
-      const messages = (await persisted.read()).filter((event) => event.type === 'user/message')
+      const messages = (await persisted.read()).events.filter(
+        (event) => event.type === 'user/message',
+      )
       assert.ok(JSON.stringify(messages).includes(proposal.guidance))
     } finally {
       await persisted.close()

@@ -82,6 +82,8 @@ const implementationFiles = [
   'scripts/benchmark/report.mjs',
   'scripts/benchmark/transport.mjs',
   'scripts/runtime-e2e/host.mjs',
+  'scripts/compatibility.mjs',
+  'package.json',
   'scripts/runtime-e2e/budget.mjs',
   'src/proposer.ts',
   'src/runtime.ts',

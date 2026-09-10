@@ -27,6 +27,12 @@ git diff --cached --check
 
 持久化修改还需覆盖重启、损坏/旧日志重放、状态转换、幂等性和相关准入竞争。模型可见变更需断言规范 Session 和实际请求。脚本 fixture 验证接线和评分；任务效果结论需要单独设计实验。
 
+## 依赖升级策略
+
+`package.json` 是兼容性唯一事实源：所有 DSH 开发包（包括其 peer 服务闭包）固定为同一个精确版本。DSH peer 范围限于该基线的 patch 发布线，显式纳入已测试的预发布版本并排除下一发布线。不要推定不同 pre-1.0 发布之间兼容。Cordis 和 Schemastery 保持独立范围；Evolver 自身版本跟随自身变更，不跟随宿主版本号。
+
+升级时一起更新所有 DSH 开发依赖和 peer 范围，运行 `pnpm install`，审查锁文件及精确版本的 `minimumReleaseAgeExclude` 条目，不全局关闭发布年龄保护。接受新发布线之前，运行 `pnpm run check:compatibility`、`pnpm peers check`、基础门禁和全部离线 runtime、adapter、benchmark 与 experience 门禁（`pnpm run test:experience`）。兼容性检查也包含在 `pnpm test` 中；集成启动器在启动前拒绝不支持或混合版本的宿主。这些命令只写本地依赖、构建和临时测试证据，不远端发布，也无需 provider 凭据。保留历史实验版本和结果；依赖升级不授权付费重跑。
+
 ## 准备宿主
 
 集成命令会构建 Evolver，默认使用相邻 `../deepseek-harness`。遵循宿主自身开发说明安装依赖并构建公共 exports 和 Web 资产。缺失或过期构建会直接失败，没有 fixture fallback。全部 DSH/Cordis 服务应统一通过宿主公共 exports 解析，不使用私有源码 import，也不混用发布/workspace 服务版本。

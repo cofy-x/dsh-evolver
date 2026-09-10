@@ -425,7 +425,7 @@ try {
   if (sessionId && status !== 'invalid') {
     const saved = await ctx.sessionPersistence.open(SessionId(sessionId), 'read')
     try {
-      const events = (await saved.read()).filter((event) => event.type === 'user/message')
+      const events = (await saved.read()).events.filter((event) => event.type === 'user/message')
       assert.equal(
         JSON.stringify(events).includes(proposal.guidance),
         arm === 'treatment',

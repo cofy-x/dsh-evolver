@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createRequire, registerHooks } from 'node:module'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { validateHost } from '../compatibility.mjs'
 
 export function installHostResolution(harness) {
   const manifests = new Map()
@@ -23,6 +24,7 @@ export function installHostResolution(harness) {
     }
   }
   for (const dir of ['packages', 'vendor', 'apps']) discover(join(harness, dir))
+  validateHost(manifests)
   let resolving = false
   return registerHooks({
     resolve(specifier, context, next) {
