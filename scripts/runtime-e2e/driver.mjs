@@ -89,6 +89,15 @@ const evolverUrl = process.env.EVOLVER_PACKAGE_DIR
   ? pathToFileURL(join(process.env.EVOLVER_PACKAGE_DIR, 'lib/index.js'))
   : new URL('../../lib/index.js', import.meta.url)
 const { EvolutionStore } = await import(evolverUrl.href)
+async function persistedEvents(session) {
+  await ctx.sessions.flush(session)
+  const handle = await ctx.sessionPersistence.open(session.id, 'read')
+  try {
+    return (await handle.read()).events
+  } finally {
+    await handle.close()
+  }
+}
 const anchor = join(harness, 'apps/cli/package.json')
 const profile = loadProfile('evolver-e2e', profileName, anchor, process.env.DSH_HOME, {
   userLayer: false,
@@ -390,7 +399,7 @@ try {
     assert.ok(hasGuidance(actualRequests.at(-1)))
     assert.ok(
       hasGuidance(
-        treatment.session.snapshotEvents().filter((event) => event.type === 'user/message'),
+        (await persistedEvents(treatment.session)).filter((event) => event.type === 'user/message'),
       ),
     )
     assert.equal(ctx.evolver.getEvaluation(proposal.id).treatment.total, 1)
@@ -400,7 +409,7 @@ try {
     const rolledBack = await fresh('evolver-rollback')
     await turn(rolledBack, [textChunks()])
     assert.equal(hasGuidance(actualRequests.at(-1)), false)
-    assert.equal(hasGuidance(rolledBack.session.snapshotEvents()), false)
+    assert.equal(hasGuidance(await persistedEvents(rolledBack.session)), false)
     const evaluation = ctx.evolver.getEvaluation(proposal.id)
     await writeFile(join(root, 'expected-evaluation.json'), JSON.stringify(evaluation))
     const evolverEntry = [...ctx.loader.entries()].find(
@@ -445,7 +454,7 @@ try {
       assert.deepEqual(executed.slice(before), [
         { fail: true, privateValue: 'PRIVATE_ARGUMENT_SENTINEL' },
       ])
-      assert.equal(scripted.length, 0, JSON.stringify(agent.session.snapshotEvents().slice(-6)))
+      assert.equal(scripted.length, 0, 'all scripted responses must be consumed after disposal')
     }
   }
   await fixtureFiber.dispose()

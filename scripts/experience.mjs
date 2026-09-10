@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, writeFile, rm, open, readdir } from 'node:fs/
 import { tmpdir } from 'node:os'
 import { join, resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveHarness } from './harness-source.mjs'
 import { TASKS, VERSION } from './benchmark/tasks.mjs'
 import { PROTOCOL_VERSION } from './benchmark/protocol.mjs'
 import { hash, summarize } from './benchmark/report.mjs'
@@ -14,7 +15,7 @@ import { ExperimentLedger, MODEL, LIVE_LIMITS } from './benchmark/experiment-led
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/experience.mjs --phase=development|training|lifecycle|recovery|freeze|evaluation|status --mode=offline|live [--state=PATH] [--plan=PATH] [--harness=PATH] [--allow-paid=yes] [--attempt=1|2] [--fault=none|success-only|rate-limit|hang] [--run-ms=1..90000]\nRun phases in the listed order. Freeze writes a new plan without model calls; commit it locally before live evaluation. Live requires explicit authorization and a persistent state directory, reuses DEEPSEEK_API_KEY only, and never resets an existing ledger. No automatic retries or replacements. Explicit development attempt 2 requires a retained invalid report and writes development-r2.json. All live phases must share the same state directory. Status reads the safe ledger without credentials. The credential-free complete loop is pnpm run test:experience.',
+    'Usage: node scripts/experience.mjs --phase=development|training|lifecycle|recovery|freeze|evaluation|status --mode=offline|live [--state=PATH] [--plan=PATH] [--harness=PATH] [--allow-paid=yes] [--attempt=1|2] [--fault=none|success-only|rate-limit|hang] [--run-ms=1..90000]\nHost path: explicit CLI, then DSH_TEST_HARNESS, then the pinned source host (pnpm run prepare:harness). Run phases in the listed order. Freeze writes a new plan without model calls; commit it locally before live evaluation. Live requires explicit authorization and a persistent state directory, reuses DEEPSEEK_API_KEY only, and never resets an existing ledger. No automatic retries or replacements. Explicit development attempt 2 requires a retained invalid report and writes development-r2.json. All live phases must share the same state directory. Status reads the safe ledger without credentials. The credential-free complete loop is pnpm run test:experience.',
   )
   process.exit(0)
 }
@@ -60,7 +61,7 @@ const requestMs = Number(options['request-ms'] ?? LIVE_LIMITS.requestMs)
 assert.ok(Number.isSafeInteger(requestMs) && requestMs > 0 && requestMs <= LIVE_LIMITS.requestMs)
 if (live) assert.equal(options['request-ms'], undefined)
 assert.ok(Number.isSafeInteger(runMs) && runMs > 0 && runMs <= 90000)
-const harness = resolve(options.harness ?? '../deepseek-harness')
+const harness = resolveHarness(options.harness)
 const product = fileURLToPath(new URL('..', import.meta.url))
 const driver = fileURLToPath(new URL('./benchmark/experience-driver.mjs', import.meta.url))
 const stateDir = options.state
@@ -83,6 +84,8 @@ const implementationFiles = [
   'scripts/benchmark/transport.mjs',
   'scripts/runtime-e2e/host.mjs',
   'scripts/compatibility.mjs',
+  'scripts/harness-source.mjs',
+  'scripts/harness-source.json',
   'package.json',
   'scripts/runtime-e2e/budget.mjs',
   'src/proposer.ts',

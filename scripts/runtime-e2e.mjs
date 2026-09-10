@@ -5,12 +5,13 @@ import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveHarness } from './harness-source.mjs'
 import { LIMITS } from './runtime-e2e/budget.mjs'
 
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/runtime-e2e.mjs [harness-checkout] [--deepseek-dry-run | --deepseek-live --allow-paid --model=ID]\nDefault: offline shipped profiles; --package-dir=PATH tests an installed archive instead of the local build (offline only). Dry-run: real DeepSeek adapter, local SSE only. Live requires explicit paid authorization and DEEPSEEK_API_KEY; reports no raw child output. Smoke options: --timeout-ms=1..120000 (lower only); dry-run only: --fault=rate-limit|hang. Input admission uses UTF-8 bytes plus framing allowance, not an authoritative tokenizer. Fixed limits: ' +
+    'Usage: node scripts/runtime-e2e.mjs [harness-checkout] [--deepseek-dry-run | --deepseek-live --allow-paid --model=ID]\nHost path: explicit CLI, then DSH_TEST_HARNESS, then the pinned source host (pnpm run prepare:harness). Default: offline shipped profiles; --package-dir=PATH tests an installed archive instead of the local build (offline only). Dry-run: real DeepSeek adapter, local SSE only. Live requires explicit paid authorization and DEEPSEEK_API_KEY; reports no raw child output. Smoke options: --timeout-ms=1..120000 (lower only); dry-run only: --fault=rate-limit|hang. Input admission uses UTF-8 bytes plus framing allowance, not an authoritative tokenizer. Fixed limits: ' +
       JSON.stringify(LIMITS),
   )
   process.exit(0)
@@ -54,7 +55,7 @@ assert.ok(
 )
 const paths = args.filter((arg) => !arg.startsWith('--'))
 assert.ok(paths.length <= 1, 'one harness checkout expected')
-const harness = resolve(paths[0] ?? '../deepseek-harness')
+const harness = resolveHarness(paths[0])
 const packageDir = args.find((arg) => arg.startsWith('--package-dir='))?.slice(14)
 assert.notEqual(packageDir, '', 'package-dir must not be empty')
 assert.ok(!packageDir || (!live && !dry), 'package-dir is for offline package acceptance only')

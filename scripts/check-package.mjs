@@ -4,17 +4,22 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { resolveHarness } from './harness-source.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const args = process.argv.slice(2)
 assert.ok(
-  args.every((arg) => arg.startsWith('--harness=') && arg.length > 10),
-  'only --harness=PATH is supported',
+  args.every((arg) => arg === '--runtime' || (arg.startsWith('--harness=') && arg.length > 10)),
+  'expected --runtime or --harness=PATH',
 )
 assert.ok(args.length <= 1)
+const harness = args.length
+  ? resolveHarness(args[0] === '--runtime' ? undefined : args[0].slice(10))
+  : undefined
 assert.equal(pkg.name, 'dsh-evolver')
 assert.notEqual(pkg.private, true)
 assert.equal(pkg.publishConfig.tag, 'alpha')
@@ -116,12 +121,12 @@ try {
     ],
     { cwd: scratch, env, stdio: 'inherit' },
   )
-  if (args[0])
+  if (harness)
     execFileSync(
       process.execPath,
       [
         join(root, 'scripts/runtime-e2e.mjs'),
-        resolve(args[0].slice(10)),
+        harness,
         `--package-dir=${join(scratch, 'node_modules/dsh-evolver')}`,
       ],
       { cwd: root, env, stdio: 'inherit', timeout: 180000 },
@@ -135,11 +140,11 @@ try {
     productDirty: Boolean(
       execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
     ),
-    runtime: Boolean(args[0]),
-    ...(args[0]
+    runtime: Boolean(harness),
+    ...(harness
       ? {
           harnessSha: execFileSync('git', ['rev-parse', 'HEAD'], {
-            cwd: resolve(args[0].slice(10)),
+            cwd: harness,
             encoding: 'utf8',
           }).trim(),
         }

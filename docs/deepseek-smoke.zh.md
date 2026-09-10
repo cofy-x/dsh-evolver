@@ -6,7 +6,7 @@ Runner 同时支持离线适配器检查和经明确授权的 live 执行。离�
 
 ## 入口和前置条件
 
-在产品 checkout 中，`node scripts/runtime-e2e.mjs --help` 是权威 CLI 参考。`pnpm run test:deepseek-offline` 会构建 Evolver，以本地 SSE 运行真实适配器，再验证 HTTP 429 和永不结束的 transport。它需要与[运行时验证](runtime-validation.zh.md)相同的已构建相邻 Harness 公共 exports，不需要 core 源码修改、私有测试辅助函数、网络或真实凭据。Runner 支持可选的 checkout 位置参数，package script 默认使用相邻 checkout。
+在产品 checkout 中，`node scripts/runtime-e2e.mjs --help` 是权威 CLI 参考。`pnpm run test:deepseek-offline` 会构建 Evolver，以本地 SSE 运行真实适配器，再验证 HTTP 429 和永不结束的 transport。它需要与[运行时验证](runtime-validation.zh.md)相同的固定源码 Harness 公共 exports，不需要 core 源码修改、私有测试辅助函数、网络或真实凭据。Runner 支持 checkout 位置参数；package script 也支持验证指南中的 `DSH_TEST_HARNESS`。
 
 Live 执行必须同时提供 `--deepseek-live --allow-paid --model=ID`，并事先在环境中提供 `DEEPSEEK_API_KEY`。执行前必须选择并确认实际 model ID。Runner 在读取该变量前先验证参数；不继承其他用户凭据、代理、endpoint override 或 Node options。不要把 key 字面量写入 shell history 或 profile YAML。授权无效或缺失会在 boot 前失败。本文不构成花费授权，必须先询问用户。
 

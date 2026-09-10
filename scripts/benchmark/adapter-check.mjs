@@ -7,7 +7,11 @@ for (const fault of ['none', 'rate-limit', 'hang']) {
   const result = spawnSync(
     process.execPath,
     [controller, '--adapter=deepseek-fixture', `--fixture-fault=${fault}`, '--run-timeout-ms=4000'],
-    { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 60000 },
+    {
+      env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
+      encoding: 'utf8',
+      timeout: 60000,
+    },
   )
   const report = JSON.parse(result.stdout)
   assert.equal(report.wireReservations.requests, fault === 'none' ? 24 : 6)
@@ -29,7 +33,7 @@ for (const args of [
   ['--adapter=deepseek-live', '--allow-paid=yes', '--fixture-fault=hang'],
 ]) {
   const result = spawnSync(process.execPath, [controller, ...args], {
-    env: { PATH: process.env.PATH },
+    env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
     encoding: 'utf8',
     timeout: 5000,
   })

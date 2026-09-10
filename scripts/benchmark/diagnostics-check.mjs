@@ -12,7 +12,7 @@ for (const legacy of [true, false]) {
       ...(legacy ? ['--fixture-fault=legacy-render'] : []),
     ],
     {
-      env: { PATH: process.env.PATH },
+      env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
       encoding: 'utf8',
       timeout: 60000,
     },

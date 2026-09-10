@@ -3,7 +3,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import semver from 'semver'
-import { compatibilityContract, productManifest } from './compatibility.mjs'
+import {
+  compatibilityContract,
+  productManifest,
+  validateInstalledClosure,
+} from './compatibility.mjs'
 
 const require = createRequire(new URL('../package.json', import.meta.url))
 const { baseline, range, development } = compatibilityContract()
@@ -24,6 +28,10 @@ for (const [name, version] of Object.entries(productManifest.devDependencies).fi
     )
   }
 }
+const resolved = validateInstalledClosure((name, parent) => {
+  const path = (parent ? createRequire(parent) : require).resolve(`${name}/package.json`)
+  return { path, manifest: JSON.parse(readFileSync(path, 'utf8')) }
+})
 console.log(
-  `DSH compatibility: ${development.length} coherent pins at ${baseline}; supported ${range}`,
+  `DSH compatibility: ${development.length} coherent pins and ${resolved} resolved instances at ${baseline}; supported ${range}`,
 )

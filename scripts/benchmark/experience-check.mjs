@@ -14,7 +14,11 @@ for (const fault of ['none', 'success-only', 'rate-limit', 'hang']) {
       '--run-ms=10000',
       '--request-ms=1000',
     ],
-    { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 60000 },
+    {
+      env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
+      encoding: 'utf8',
+      timeout: 60000,
+    },
   )
   const report = JSON.parse(result.stdout)
   assert.equal(report.implementationUnchanged, true)

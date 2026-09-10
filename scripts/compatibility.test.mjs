@@ -4,7 +4,12 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import semver from 'semver'
-import { compatibilityContract, productManifest, validateHost } from './compatibility.mjs'
+import {
+  compatibilityContract,
+  productManifest,
+  validateHost,
+  validateInstalledClosure,
+} from './compatibility.mjs'
 
 test('host validation rejects missing, mixed, and unsupported releases before boot', () => {
   const directory = mkdtempSync(join(tmpdir(), 'evolver-compatibility-'))
@@ -37,6 +42,7 @@ test('the declared line admits the pinned prerelease and stable release but not 
   assert.equal(semver.satisfies(`${v.major}.${v.minor}.${v.patch + 1}-alpha.1`, range), false)
   assert.equal(semver.satisfies(`${v.major}.${v.minor}.${v.patch + 1}`, range), false)
   assert.equal(semver.satisfies('0.1.2-rc.1', range), false)
+  assert.equal(semver.satisfies('0.1.5-alpha.2', range), false)
 })
 
 test('partial upgrades, floating pins, and broad prerelease-excluding peers fail closed', () => {
@@ -55,4 +61,34 @@ test('partial upgrades, floating pins, and broad prerelease-excluding peers fail
     change(pkg)
     assert.throws(() => compatibilityContract(pkg))
   }
+})
+
+test('nested DSH versions and unpinned transitive peers cannot hide behind coherent root pins', () => {
+  const { baseline, development } = compatibilityContract()
+  const resolver = (mutate) => (name, parent) => {
+    const manifest = { name, version: baseline }
+    if (name === '@deepseek-ai/dsh-agent')
+      manifest.dependencies = { '@deepseek-ai/dsh-util-values': '^' + baseline }
+    mutate?.(manifest, parent)
+    return { path: (parent ? 'nested/' : 'root/') + name, manifest }
+  }
+  assert.equal(validateInstalledClosure(resolver()), development.length + 1)
+  assert.throws(
+    () =>
+      validateInstalledClosure(
+        resolver((manifest, parent) => {
+          if (parent) manifest.version = '0.0.0'
+        }),
+      ),
+    /mixed installed DSH releases/,
+  )
+  assert.throws(
+    () =>
+      validateInstalledClosure(
+        resolver((manifest) => {
+          manifest.peerDependencies = { '@deepseek-ai/dsh-unpinned': '*' }
+        }),
+      ),
+    /missing development pin/,
+  )
 })

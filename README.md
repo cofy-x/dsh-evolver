@@ -2,37 +2,22 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
-**Auditable, verifier-gated self-evolution for DeepSeek Harness.**
+Auditable, verifier-gated strategy evolution for DeepSeek Harness.
 
-> [!WARNING]
->
-> Status: early development and experimental. DSH Evolver creates reviewable strategy proposals; it does not autonomously modify DSH, plugins, or user source code.
+DSH Evolver turns bounded execution failures into reviewable strategy proposals. Verification, human acceptance and explicit promotion must all happen before guidance reaches a later Session. It does not autonomously edit DSH, plugins or user code. The product is experimental: its fixed diagnostic template and structural verifier do not establish improved task success.
 
-DSH Evolver turns bounded facts from agent execution into reusable strategy guidance with explicit verification, human review, and promotion. Unlike ordinary memory, collected failures do not immediately influence future requests. Unlike a skill library, a candidate is tied to provenance and an auditable lifecycle before it can become active.
+## Use
 
-```text
-DSH events
-  -> observations
-  -> exact failure patterns
-  -> proposal admission
-  -> proposal
-  -> verification
-  -> human review
-  -> promotion or rejection
-  -> baseline/treatment evaluation
-  -> keep or human rollback
-```
-
-## Minimal example
-
-Install the Git repository into a DSH profile and restart that profile:
+Install the published alpha into a DSH profile, then restart that profile:
 
 ```sh
-dsh plugin --profile web add github:cofy-x/dsh-evolver
+dsh plugin --profile web add dsh-evolver@alpha
 dsh --profile web --dump-config
 ```
 
-After a model-requested tool fails, inspect and review the generated proposal through a command-capable DSH client:
+The archive includes built JavaScript and declarations. Replace `alpha` with a published version for an exact candidate. [package.json](package.json) declares the development baseline and host compatibility; the registry channel may still point to an earlier release. Git installation remains available as `dsh plugin --profile web add github:cofy-x/dsh-evolver` and requires the development toolchain.
+
+After a model-requested tool fails, use a command-capable DSH client:
 
 ```text
 /evolve list
@@ -44,28 +29,19 @@ After a model-requested tool fails, inspect and review the generated proposal th
 /evolve evaluate <proposal-id>
 ```
 
-A rejected candidate uses `/evolve reject <proposal-id> <reason>`. Promotion is deliberately separate from acceptance. A promoted strategy is injected only when a later Agent Session starts, through DSH's existing logged `agent.inject()` path. If measured results regress or an operator otherwise withdraws the strategy, `/evolve rollback <proposal-id> <reason>` records the decision and stops future injection without erasing history.
+Acceptance and promotion are separate human decisions. Reject with `/evolve reject <proposal-id> <reason>`; withdraw active guidance with `/evolve rollback <proposal-id> <reason>`. Promotion and rollback affect later Sessions without erasing history.
 
-## How it works
+## Contract
 
-The plugin exposes `ctx.evolver`, records tool failures as redacted observations, groups them into exact-signature patterns, and generates strategy proposals checked by an offline structural safety verifier. After human acceptance and promotion, guidance enters later Sessions through logged `agent.inject()`.
+The offline plugin exposes `ctx.evolver`, groups redacted failures into exact-signature patterns and manages proposal generations. Only promoted text enters model context through the public, logged `agent.inject()` channel. Evaluation is an exposure-scoped failure-rate comparison that informs human decisions, not automatic rollback or proof of causality.
 
-Baseline/treatment tool failure rates inform human rollback decisions. The current proposer uses a fixed diagnostic template; improved task success has not been established. See [architecture](docs/architecture.md) for state transitions, persistence, and consistency limits.
+The audit stores bounded diagnostic facts and canonical Session references, never complete transcripts, reasoning, tool arguments, credentials or complete tool output. Redaction is defensive, not a guarantee that arbitrary text is nonsensitive; protect the owner-only audit file. Use one active runtime per data directory.
 
-## Safety model
+Configuration is defined by [the loader schema](src/config.ts). The [profile patch](cordis.patch.yml) adds an optional plugin row to Web or Headless profiles. Evolver owns neither model credentials nor tool permissions and cannot execute proposal text or rewrite verifier, evaluator, approval or safety policy.
 
-- Default output is a proposal, never a source edit or command execution.
-- Only bounded strategy guidance is implemented; evaluator, verifier, approval, and safety policy self-modification are forbidden.
-- Deterministic verification must pass before human acceptance, and explicit acceptance must precede promotion.
-- The model receives only promoted strategies, through a canonical logged DSH message.
-- The collector stores no complete transcript, reasoning, tool arguments, credentials, or complete tool output.
-- The MVP is offline and contacts no external network.
-- Effectiveness facts are metadata-only, bounded by fixed experiment windows, and cannot automatically mutate lifecycle state.
-- Cordis owns every registration, and disposal removes contributions and drains admitted writes.
+## Develop and extend
 
-## Installation
-
-Development and Git installation require Node.js 24 or newer and pnpm 11. npm candidates use the `alpha` channel; consult [npm release](docs/releasing.md) for archive verification and publication. Until the first registry release is verified, use the Git installation above. Once available, install with `dsh plugin --profile web add dsh-evolver@alpha` and restart the profile. Published archives include built JavaScript and declarations; consumers do not need to build Evolver. Host compatibility is declared in `package.json`.
+Use Node.js 24 or newer and pnpm 11:
 
 ```sh
 git clone https://github.com/cofy-x/dsh-evolver.git
@@ -74,24 +50,8 @@ pnpm install --frozen-lockfile
 pnpm run build
 ```
 
-The included `cordis.patch.yml` inserts one optional `dsh-evolver` row into a selected Web or Headless profile. Configuration supports `dataDir`, `maxEvidenceChars`, `maxPromotedStrategies`, `evaluationWindowSize` (default 20), `minimumEvaluationSamples` (default 5), `regressionThreshold` (default 0.15), `reproposalAfterOccurrences` (default 5, maximum 1000), and `generationReservationTimeoutMs` (default 300000, maximum 86400000); invalid or unsafe bounds fail plugin loading.
+Use `pnpm run prepare:harness` to build the pinned released Harness source for integration tests. Follow [AGENTS.md](AGENTS.md) and the [verification guide](docs/runtime-validation.md). The [documentation map](docs/README.md) routes architecture, release and experiment work. [Architecture](docs/architecture.md) defines future priorities and extension prerequisites: establish useful strategy evidence before adding providers, automation or storage complexity.
 
-## Data and privacy
+## Prior art and license
 
-The store contains Session and call identifiers, tool names, sampled success/failure outcomes, error codes, bounded redacted summaries, proposal text, verification evidence, exposure records, aggregate evaluation projections, and lifecycle facts. Successful outcomes with no collecting baseline or treatment window are discarded. The store does not retain tool arguments, successful values, returned content, or duplicate canonical DSH Session events. Common credential forms, URLs, and user home prefixes are redacted before persistence, but operators should still treat the owner-only audit file as potentially sensitive diagnostic data.
-
-## Development
-
-[Package scripts](package.json) define development commands. Select [verification gates](docs/runtime-validation.md) for the changed boundary and follow [AGENTS.md](AGENTS.md). The [documentation map](docs/README.md) routes architecture, paid smoke, and paired experiment work.
-
-## Prior Art and Acknowledgements
-
-`dsh-evolver` is an independent, DSH-native implementation of auditable agent self-evolution. Its design is inspired in part by [EvoMap/evolver](https://github.com/EvoMap/evolver) and broader experience-driven agent-evolution research. It is not affiliated with or endorsed by EvoMap. No EvoMap source code, prompts, private formats, or protocol compatibility claims are used by this implementation.
-
-## Operational limits
-
-Use one active runtime per data directory. Promotion and rollback affect later Sessions; exposure persistence and Session writes are not atomic across stores. The product remains offline; external verifiers, LLM proposal generation, and code evolution are not implemented. See [architecture](docs/architecture.md) for extension prerequisites.
-
-## License
-
-[MIT](LICENSE).
+This independent, MIT-licensed DSH-native implementation is inspired in part by [EvoMap/evolver](https://github.com/EvoMap/evolver) and experience-driven agent-evolution research. It is not affiliated with or endorsed by EvoMap; no EvoMap source code, prompts or private formats are implementation inputs, and no protocol compatibility is claimed. See [LICENSE](LICENSE).

@@ -33,7 +33,7 @@ try {
           `--plan=${planPath}`,
         ],
         {
-          env: { PATH: process.env.PATH },
+          env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
           encoding: 'utf8',
           timeout: 10000,
         },
@@ -52,7 +52,7 @@ try {
         ...(['freeze', 'evaluation'].includes(phase) ? [`--plan=${join(state, 'plan.json')}`] : []),
       ],
       {
-        env: { PATH: process.env.PATH },
+        env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
         encoding: 'utf8',
         timeout: 120000,
       },

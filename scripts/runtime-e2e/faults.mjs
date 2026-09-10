@@ -12,7 +12,11 @@ for (const fault of ['rate-limit', 'hang']) {
       `--fault=${fault}`,
       '--timeout-ms=4000',
     ],
-    { encoding: 'utf8', timeout: 8000, env: { PATH: process.env.PATH } },
+    {
+      encoding: 'utf8',
+      timeout: 8000,
+      env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
+    },
   )
   assert.equal(result.error, undefined)
   assert.notEqual(result.status, 0)

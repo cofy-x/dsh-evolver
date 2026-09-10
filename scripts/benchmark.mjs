@@ -3,8 +3,9 @@ import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveHarness } from './harness-source.mjs'
 import { TASKS, VERSION } from './benchmark/tasks.mjs'
 import { BOUNDS, hash, schedule, summarize } from './benchmark/report.mjs'
 import { LEGACY_PROTOCOL_VERSION } from './benchmark/protocol.mjs'
@@ -12,7 +13,7 @@ import { LEGACY_PROTOCOL_VERSION } from './benchmark/protocol.mjs'
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/benchmark.mjs [--harness=PATH] [--split=development|pilot|heldout] [--seed=INTEGER] [--baseline=solve|repeat|claim|overhead|budget|infra|hang|leak] [--treatment=...] [--run-timeout-ms=1..45000] [--adapter=scripted|deepseek-fixture|deepseek-live] [--model=deepseek-v4-flash] [--allow-paid=yes]\nDefault offline. DeepSeek modes require the pilot split and prohibit script overrides. Live requires explicit paid opt-in and DEEPSEEK_API_KEY; only the official endpoint is allowed. Safe JSON only; temporary state is removed.',
+    'Usage: node scripts/benchmark.mjs [--harness=PATH] [--split=development|pilot|heldout] [--seed=INTEGER] [--baseline=solve|repeat|claim|overhead|budget|infra|hang|leak] [--treatment=...] [--run-timeout-ms=1..45000] [--adapter=scripted|deepseek-fixture|deepseek-live] [--model=deepseek-v4-flash] [--allow-paid=yes]\nHost path: explicit CLI, then DSH_TEST_HARNESS, then the pinned source host (pnpm run prepare:harness). Default offline. DeepSeek modes require the pilot split and prohibit script overrides. Live requires explicit paid opt-in and DEEPSEEK_API_KEY; only the official endpoint is allowed. Safe JSON only; temporary state is removed.',
   )
   process.exit(0)
 }
@@ -50,7 +51,7 @@ assert.ok(
     ['solve', 'repeat', 'claim', 'overhead', 'budget', 'infra', 'hang', 'leak'].includes(value),
   ),
 )
-const harness = resolve(options.harness ?? '../deepseek-harness')
+const harness = resolveHarness(options.harness)
 const apiKey = live ? process.env.DEEPSEEK_API_KEY : 'fixture-not-a-secret'
 if (live) assert.ok(apiKey && !/[\r\n]/.test(apiKey), 'DEEPSEEK_API_KEY is required')
 const root = await mkdtemp(join(tmpdir(), 'dsh-evolver-benchmark-'))
@@ -77,6 +78,9 @@ const implementationFiles = [
   'scripts/benchmark/diagnostics.mjs',
   'scripts/benchmark/protocol.mjs',
   'scripts/runtime-e2e/host.mjs',
+  'scripts/compatibility.mjs',
+  'scripts/harness-source.mjs',
+  'scripts/harness-source.json',
   'scripts/runtime-e2e/budget.mjs',
   'src/proposer.ts',
 ]

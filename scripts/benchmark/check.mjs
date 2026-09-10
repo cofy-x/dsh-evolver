@@ -24,7 +24,12 @@ for (const [baseline, treatment, count, delta] of scenarios) {
       `--treatment=${treatment}`,
       '--run-timeout-ms=4000',
     ],
-    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 60000, maxBuffer: 1024 * 1024 },
+    {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, DSH_TEST_HARNESS: process.env.DSH_TEST_HARNESS },
+      timeout: 60000,
+      maxBuffer: 1024 * 1024,
+    },
   )
   assert.equal(child.error, undefined)
   const report = JSON.parse(child.stdout)

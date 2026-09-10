@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       stage:
-        description: Submit to npm staging (only after the first interactive publish)
+        description: Submit the verified archive to npm staging for human approval
         default: false
         type: boolean
 
