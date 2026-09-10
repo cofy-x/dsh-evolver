@@ -2,7 +2,7 @@
 
 [English](paired-benchmark.md) | [简体中文](paired-benchmark.zh.md) | [文档索引](README.zh.md)
 
-状态：离线 benchmark，加上显式授权、仅限 pilot 的真实 DeepSeek adapter 模式。[2026-09-06 授权 pilot](pilot-result-2026-09-06.zh.md) 已完成，两组均未在预算内完成三项目标；这不是正向效果证据。成功的 [live 生命周期 smoke](deepseek-smoke.zh.md)证明不同性质，不能复用为效果证据。默认仍无凭据；付费执行单独授权。
+状态：无凭据 benchmark，加上明确授权的 DeepSeek 实验。旧 runner 仍仅限 pilot；版本化 experience controller 要求先冻结计划才能进行 heldout 评估。[2026-09-06 pilot](pilot-result-2026-09-06.zh.md)保留两组 0/3 结果。[2026-09-08 experience 结果](experience-result-2026-09-08.zh.md)证明真实经验/生命周期接线和六组双方成功的 heldout 配对，但没有成功率提升证据。[Live 生命周期 smoke](deepseek-smoke.zh.md)证明不同性质，不能复用为效果证据。付费执行仍单独授权。
 
 ## 范围和入口
 
@@ -54,7 +54,35 @@ Seed 确定性排序任务，arm 顺序交替 baseline-first/treatment-first；�
 
 ## 离线验收
 
+### 诊断追踪
+
+构建后运行 `node scripts/benchmark/diagnostics-check.mjs`，无需凭据即可复现 v1 测量缺陷：benchmark 的 `output.render(value)` 误用了参数对象，DSH 公共回调实际为 `output.render(args, value)`。成功工具的实际返回值未进入后续序列化请求，但预先知道答案的脚本仍能完成精确状态目标。同一检查现在也验证修复后的渲染器。原负向 pilot 保持不变；当时通过的完整性检查不代表工具结果语义正确。诊断投影只记录有界操作顺序、枚举失败、目标进展和传递布尔证据，不记录原始值或 transcript。小预算 runner 用 `recovery-protocol-v1-render-v2` 标识渲染修复，保留原 schema/预算；错误渲染器只作为离线回归故障使用。
+
+## 版本化 experience development
+
+Experience controller 复用未改变的 v1 任务分区、world 和精确状态 grader。`recovery-protocol-v2` 修正结果渲染，声明合法 action 和 payload 字段结构，不暴露目标值或评分逻辑。这是新的模型可见协议，不是重分类首次 pilot。`pnpm run test:experience` 用真实随附 Headless、实际 DeepSeek adapter 和本地 SSE 验证执行、工具结果传递、429 零重试及父进程请求时限。CLI 入口为 `node scripts/experience.mjs --help`。
+
+构建后，明确授权的 development 命令为 `node scripts/experience.mjs --mode=live --phase=development --state=.cache/experience-20260908 --allow-paid=yes`。只引用 `DEEPSEEK_API_KEY`，固定 `deepseek-v4-flash`、官方 completion endpoint，并关闭自动重试。后续所有 live 阶段必须复用同一 state 目录，持久保存唯一账本和安全报告；原始 Session 和工具状态仅在独立临时目录中，子进程退出后清理。账本缺失/损坏或存在未结束运行时 fail-closed，不重置；已占用的 phase/run 不可静默重跑。`node scripts/experience.mjs --phase=status --state=.cache/experience-20260908` 不读取凭据，只报告预留和 usage。
+
+共享上限：160 请求，每请求 1,024 output tokens、累计预留 163,840；每请求 8,192 保守 input admission units、累计 1,310,720；每请求 30 秒，live 子进程累计墙钟 20 分钟。传输前提交预留，失败请求也占用。非评估阶段到 120 请求即停止，至少保留 40 个评估名额。父进程检查每个已预留请求的 deadline，可终止无响应子进程；这不证明远端取消或最终计费。实际 usage、未报告 usage 的失败请求与预留量分开。实现和无凭据测试时间不计入 live 墙钟账本。
+
+初始 development 包含三个任务，每项最多六请求、十次获准工具操作、进程上限 90 秒，并遵守共享请求限制。三项目标都可行后才继续策略评估；连续两次 infrastructure 失败停止剩余 development 运行，保留为 not-run。协议改进和结果应保留独立身份，不覆盖旧失败。
+
 默认同脚本 pilot 必须得到三个双方成功 pair、零成功率差，并显示额外 guidance 输入开销。回归场景有意制造无状态变化却宣称成功、重复非法调用、额外 inspect、请求预算耗尽、基础设施失败、baseline guidance 泄漏和永不结束响应，必须正确识别。脚本 treatment-only 成功只是评分测试，不是 guidance 导致提升的证据。
+
+首次 development 暴露了实验断言缺陷：评估窗口之外的成功操作合法地不创建 audit journal。无凭据 `success-only` fixture 现已覆盖该情形；仅在 observation/proposal store 为空且诊断无失败时接受文件缺失，其他读取错误仍失败。保留无效首次运行后，显式 `--attempt=2` 在同一 state/账本使用独立 run ID 和 `development-r2.json`；不会替换 `development.json`，也不会自动重试。
+
+### 真实经验与冻结 heldout 流程
+
+[冻结 heldout-v1 计划](experience-heldout-v1.json)在 heldout 模型执行前记录真实 development 候选与可执行调度。该 JSON 是事实源；下述流程与解释边界在两种语言中一致。
+
+`pnpm run test:experience` 是无凭据完整闭环，包含故障回归以及 development → training → lifecycle → 独立进程 recovery → freeze → 六组 heldout fixture 配对。它通过本地 SSE 使用实际 DeepSeek adapter，不使用真实凭据。脚本成功证明测量与生命周期接线，不证明策略有效性。
+
+明确授权的 live 运行应复用 development 命令的全部 `--mode=live --state=.cache/experience-20260908 --allow-paid=yes` 参数，依次使用 `--phase=training`、`--phase=lifecycle`、`--phase=recovery`。Training 要求所有 development 的精确状态目标已通过有效测量证明可行，同时独立保留更严格的预算内成功指标。每个训练演练要求真实模型先尝试一次明确非法的 development 操作，再恢复；通过公共 DSH 工具结果事件创建提案。这是受控失败诱导，不是自然采样的生产经验。现有通用确定性 proposer/verifier 不变，不引入恢复目录或效果结论。保留候选 ID、observation/pattern/generation 来源、错误码、verifier 身份与 guidance hash。仅在隔离 home 用公开命令模拟人工 accept/promote。Training 每类六请求，lifecycle 十六请求，recovery 六请求，仍共用所有总限制，不自动替换运行。
+
+Lifecycle 验证 accepted 无指导、promoted 指导进入规范历史与实际 wire、一个真正暴露的 treatment outcome、既有未暴露 Session 不贡献 treatment、rollback 排除指导，以及 disposal 后独立测试工具仍可用但 journal 不再变化。独立进程 recovery 在新活动前精确比较 proposal、pattern、observation 数量和 evaluation replay，并确认 superseded 指导不注入。通用指导以工具名/错误码为条件，但产品不执行语义任务匹配或跨 pattern 去重；实验每个 arm 只使用对应家族的 accepted seed。离线 verifier 只提供结构检查，不证明正确性或效果。
+
+上述阶段通过后，用相同 live 参数运行 `--phase=freeze --plan=docs/experience-heldout-v1.json`，写入新计划而不调用模型。审查并本地提交该文件，然后运行 `--phase=evaluation --plan=docs/experience-heldout-v1.json`。Live evaluation 在读取凭据前拒绝未提交/变更计划、实现变化、seed journal 变化和模式不一致。计划冻结六组配对（每类 heldout 实例 1、2）、调度 seed 17 下交替 arm 顺序、每 arm 六请求/十工具/90 秒、不变精确状态 grader、input 预留与真实 token usage 的区分、全部失败/not-run 行及描述性分析。每个 arm 都是新进程、新 Session、相同 accepted 字节；仅 treatment 经公开命令提升。即使已达到目标，预算耗尽仍算失败。不要求正向提升，本版本不包含 heldout 后调优或替换运行。
 
 ## 真实 adapter pilot 契约
 

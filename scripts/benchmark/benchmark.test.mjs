@@ -3,6 +3,33 @@ import assert from 'node:assert/strict'
 import { TASKS, createWorld, grade, scriptFor, prompt } from './tasks.mjs'
 import { schedule, summarize } from './report.mjs'
 import { reserve } from './transport.mjs'
+import { TaskDiagnostics, failureCategory } from './diagnostics.mjs'
+
+test('diagnostics retain only bounded action/error/progress evidence and detect renderer loss', () => {
+  const task = TASKS.find((t) => t.family === 'format')
+  const world = createWorld(task)
+  const diagnostics = new TaskDiagnostics(task, world)
+  const args = { action: 'inspect', payload: 'PRIVATE_ARGUMENT_SENTINEL' }
+  const value = diagnostics.execute('one', args, () => world.execute(args))
+  const content = [{ type: 'text', text: args }]
+  diagnostics.result({ callId: 'one', arguments: args }, { isError: false, content })
+  diagnostics.options([
+    { content: [{ type: 'tool-result', toolCallId: 'one', content, isError: false }] },
+  ])
+  diagnostics.wire([{ role: 'tool', tool_call_id: 'one', content: '[object Object]' }])
+  let [row] = diagnostics.snapshot().operations
+  assert.equal(row.bodyValueRendered, false)
+  assert.equal(row.nextOptions.matchesFinal, true)
+  assert.equal(row.nextWire.matchesBody, false)
+  assert.ok(!JSON.stringify(diagnostics.snapshot()).includes('PRIVATE_ARGUMENT_SENTINEL'))
+  assert.ok(!JSON.stringify(diagnostics.snapshot()).includes(value))
+  const good = scriptFor(task, 'solve')[2][0]
+  diagnostics.execute('two', good, () => world.execute(good))
+  row = diagnostics.snapshot().operations[1]
+  assert.equal(row.progress, 'closer')
+  assert.equal(row.goalReached, true)
+  assert.equal(failureCategory('secret=NEVER_REPORT_THIS', 'UNRECOGNIZED'), 'other-tool-error')
+})
 
 test('pilot wire ledger spans all six runs, rejects extensions and corrupted state', () => {
   const wire = {

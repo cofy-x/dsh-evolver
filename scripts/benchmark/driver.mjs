@@ -14,6 +14,8 @@ import { taskById, TASKS, createWorld, prompt, grade, scriptFor } from './tasks.
 import { BOUNDS, hash } from './report.mjs'
 import { reserve, response } from './transport.mjs'
 import { checkDestination } from '../runtime-e2e/budget.mjs'
+import { TaskDiagnostics } from './diagnostics.mjs'
+import { LEGACY_TOOL_SPEC, renderResult, legacyRender } from './protocol.mjs'
 
 const [
   harness,
@@ -73,8 +75,10 @@ globalThis.fetch = transport
         requests++
       } catch {
         status = 'budget'
+        stopReason ??= 'wire-admission'
         throw new Error('pilot admission failed')
       }
+      diagnostics.wire(wire.messages)
       await checkpoint()
       if (!live) {
         if (fault === 'rate-limit') return new Response('{}', { status: 429 })
@@ -93,6 +97,7 @@ globalThis.fetch = transport
         })
       } catch {
         status = 'infrastructure'
+        stopReason ??= 'provider-transport'
         throw new Error('pilot transport failed')
       }
     }
@@ -117,6 +122,7 @@ const { EvolutionStore, EvolutionService, DeterministicSafetyVerifier } = await 
 )
 const task = taskById(taskId)
 const world = createWorld(task)
+const diagnostics = new TaskDiagnostics(task, world)
 const initialStateHash = hash({ task, state: world.snapshot() })
 const seedDir = join(pairRoot, 'seed')
 // Prepare one training-only accepted journal, then copy it byte-for-byte into each arm.
@@ -199,6 +205,7 @@ let requests = 0
 let inputUnits = 0
 let outputUnits = 0
 let status = 'completed'
+let stopReason
 let firstRequestHash
 let wireFirstRequestHash
 let currentInput = 0
@@ -218,6 +225,7 @@ const completed = new Promise((resolve) => {
 async function inspectRequest(options) {
   if (status !== 'completed') throw new Error('benchmark stopped')
   sessionId = options.sessionId
+  diagnostics.options(options.messages)
   assert.deepEqual(
     options.tools.map((tool) => tool.name),
     ['bench_apply'],
@@ -255,6 +263,7 @@ async function inspectRequest(options) {
   const size = Buffer.byteLength(JSON.stringify(visible)) + 256 + visible.messages.length * 32
   if (requests >= BOUNDS.requestsPerRun || (!transport && size > BOUNDS.inputPerRequest)) {
     status = 'budget'
+    stopReason ??= requests >= BOUNDS.requestsPerRun ? 'request-budget' : 'input-budget'
     throw new Error('benchmark request budget')
   }
   if (!transport) {
@@ -275,6 +284,7 @@ async function checkpoint() {
       exposureSeen,
       seedHash: hash(seedText),
       guidanceHash: hash(proposal.guidance),
+      diagnostics: diagnostics.snapshot(),
     }),
     { mode: 0o600 },
   )
@@ -288,6 +298,7 @@ class Adapter extends LlmAdapter {
     if (behavior === 'hang') await new Promise(() => {})
     if (behavior === 'infra') {
       status = 'infrastructure'
+      stopReason ??= 'runtime-error'
       throw new Error('synthetic infrastructure failure')
     }
     const calls = script.shift()
@@ -303,6 +314,7 @@ class Adapter extends LlmAdapter {
     const outputSize = Buffer.byteLength(JSON.stringify(blocks))
     if (outputSize > BOUNDS.outputPerRequest) {
       status = 'budget'
+      stopReason ??= 'output-budget'
       throw new Error('benchmark output budget')
     }
     for (const [index, block] of blocks.entries()) {
@@ -338,6 +350,7 @@ try {
         name: 'benchmark-fixture',
         inject: ['llm', 'tools', 'systemPrompt'],
         apply(scoped) {
+          scoped.on('tools/result', (exec, result) => diagnostics.result(exec, result))
           scoped.systemPrompt.section({
             name: 'benchmark',
             order: 0,
@@ -387,23 +400,18 @@ try {
             )
           scoped.tools.register(
             defineTool({
-              name: 'bench_apply',
-              description:
-                'Inspect record rules/current state or commit a JSON payload to the isolated record.',
-              parameters: {
-                action: { type: 'string', required: true },
-                payload: { type: 'string', required: true },
-              },
+              ...LEGACY_TOOL_SPEC,
               output: {
                 schema: { type: 'string' },
-                render: (value) => [{ type: 'text', text: value }],
+                render: fault === 'legacy-render' ? legacyRender : renderResult,
               },
-              execute(args) {
+              execute(args, exec) {
                 if (status !== 'completed' || world.snapshot().calls >= BOUNDS.toolCallsPerRun) {
                   status = 'budget'
+                  stopReason ??= 'tool-budget'
                   throw new Error('benchmark tool budget')
                 }
-                return world.execute(args)
+                return diagnostics.execute(exec.callId, args, () => world.execute(args))
               },
             }),
           )
@@ -450,6 +458,14 @@ await writeFile(
     taskId,
     arm,
     status,
+    stopReason:
+      stopReason ??
+      (status === 'completed'
+        ? 'completed'
+        : status === 'budget'
+          ? 'output-budget'
+          : 'runtime-error'),
+    diagnostics: diagnostics.snapshot(),
     goalReached: grade(task, state),
     success: status === 'completed' && grade(task, state),
     calls: state.calls,

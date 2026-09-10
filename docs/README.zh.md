@@ -11,6 +11,6 @@
 | 如何安全验证真实 DeepSeek 传输？   | [DeepSeek smoke](deepseek-smoke.zh.md)   |
 | 如何衡量任务成功并解释配对比较？   | [配对 benchmark](paired-benchmark.zh.md) |
 
-Benchmark 按需链接保留的负向 pilot 证据。常规执行日志和已完成工作留在报告与 Git 历史，不进入默认阅读路径。当前接口和命令以代码/package scripts 为准，修订以 Git 为准；文档保存长期契约和未解决决策。
+Benchmark 按需链接保留的 pilot 与 experience 证据。常规执行日志和已完成工作留在报告与 Git 历史，不进入默认阅读路径。当前接口和命令以代码/package scripts 为准，修订以 Git 为准；文档保存长期契约和未解决决策。
 
 英文为权威版本；同一变更同步中文，保持命令、限制、安全约束和结论一致。

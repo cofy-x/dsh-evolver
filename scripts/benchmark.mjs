@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TASKS, VERSION } from './benchmark/tasks.mjs'
 import { BOUNDS, hash, schedule, summarize } from './benchmark/report.mjs'
+import { LEGACY_PROTOCOL_VERSION } from './benchmark/protocol.mjs'
 
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
@@ -30,7 +31,7 @@ assert.ok(['scripted', 'deepseek-fixture', 'deepseek-live'].includes(adapter))
 const live = adapter === 'deepseek-live'
 const transport = adapter !== 'scripted'
 const fault = options['fixture-fault'] ?? 'none'
-assert.ok(['none', 'rate-limit', 'hang'].includes(fault))
+assert.ok(['none', 'rate-limit', 'hang', 'legacy-render'].includes(fault))
 if (options['fixture-fault']) assert.equal(adapter, 'deepseek-fixture')
 const model = options.model ?? 'deepseek-v4-flash'
 assert.ok(/^deepseek-[a-z0-9-]+$/.test(model))
@@ -73,6 +74,8 @@ const implementationFiles = [
   'scripts/benchmark/tasks.mjs',
   'scripts/benchmark/report.mjs',
   'scripts/benchmark/transport.mjs',
+  'scripts/benchmark/diagnostics.mjs',
+  'scripts/benchmark/protocol.mjs',
   'scripts/runtime-e2e/host.mjs',
   'scripts/runtime-e2e/budget.mjs',
   'src/proposer.ts',
@@ -167,6 +170,8 @@ try {
       rows.push({
         ...empty,
         status: 'timeout',
+        stopReason: 'run-time-budget',
+        diagnostics: checkpoint.diagnostics,
         firstRequestHash: checkpoint.firstRequestHash,
         initialStateHash: checkpoint.initialStateHash,
         seedHash: checkpoint.seedHash,
@@ -213,6 +218,7 @@ try {
     }
   const report = {
     version: VERSION,
+    protocol: fault === 'legacy-render' ? 'legacy-render-reproduction' : LEGACY_PROTOCOL_VERSION,
     evidence: live
       ? 'live-adapter-pilot'
       : transport

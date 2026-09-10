@@ -1,0 +1,214 @@
+{
+  "version": "experience-heldout-v1",
+  "taskVersion": "recovery-benchmark-v1",
+  "protocol": "recovery-protocol-v2",
+  "fixtureHash": "fa08b6e51aed5a1d6f8fe35299a85032ef51d94cf0b16000e5c5d06d9e09e2c8",
+  "implementationHash": "2dc7b523f2be527c547b5fa922df583902617aa5c0c3b3a2b100d442cd513549",
+  "harnessSha": "d347e703908d0406b7a7ef80e3a0e594d86b2215",
+  "model": "deepseek-v4-flash",
+  "limits": {
+    "requests": 160,
+    "outputPerRequest": 1024,
+    "output": 163840,
+    "inputPerRequest": 8192,
+    "input": 1310720,
+    "requestMs": 30000,
+    "liveMs": 1200000,
+    "evaluationReserve": 40
+  },
+  "strategy": "Unchanged generic deterministic proposer; conditional guidance names the origin tool/error code. No recovery catalogue, LLM proposer, automatic review or strategy tuning.",
+  "partitions": "Development trains controlled real-model failure drills; original pilot remains unchanged; heldout instances 1 and 2 per family are evaluated once. No heldout live outcomes used to select candidates.",
+  "trainingMode": "live",
+  "candidates": [
+    {
+      "family": "precondition",
+      "seedHash": "9f685dea5e57e1df6c843b1a55e81f4fa168780bd7bc0a18d4efbe35b0cd145c",
+      "selected": [
+        {
+          "id": "a2325035-5fee-4478-b64a-caa69f3c1b12",
+          "guidanceHash": "b122292d641935b1b5d64f56be390f9cb35648ddbbde540d04552363e1dfd5e5"
+        }
+      ],
+      "provenance": [
+        {
+          "id": "a2325035-5fee-4478-b64a-caa69f3c1b12",
+          "observationId": "49481fed-591b-4054-a532-78c83903e70b",
+          "patternId": "fp1_509f1d274d7706cf51e2a50ad15dc08d8f50c8ec175f7148fd433302f566a4d5",
+          "generation": 1,
+          "patternOccurrence": 1,
+          "errorCode": "STALE_REVISION",
+          "verifier": "deterministic-safety-v1",
+          "guidanceHash": "b122292d641935b1b5d64f56be390f9cb35648ddbbde540d04552363e1dfd5e5"
+        }
+      ]
+    },
+    {
+      "family": "format",
+      "seedHash": "33480fb2412793e62b19708e59c2f715835fb97d869b08a3872c9de38ab29af0",
+      "selected": [
+        {
+          "id": "5be29abd-cb87-4146-8c97-08b99f3b6634",
+          "guidanceHash": "92e0baad0f1f41ea745bed2b2067dffcd6569311584f4cbf31fb35dd49944915"
+        }
+      ],
+      "provenance": [
+        {
+          "id": "5be29abd-cb87-4146-8c97-08b99f3b6634",
+          "observationId": "15af17ec-2d6f-4de8-b2a1-e57d697c1e65",
+          "patternId": "fp1_5196ba21cf41a05f2d9ef71266d86bcbe6d0464aba399bd2c9a32ba58e277a9b",
+          "generation": 1,
+          "patternOccurrence": 1,
+          "errorCode": "UPPERCASE_REQUIRED",
+          "verifier": "deterministic-safety-v1",
+          "guidanceHash": "92e0baad0f1f41ea745bed2b2067dffcd6569311584f4cbf31fb35dd49944915"
+        }
+      ]
+    },
+    {
+      "family": "batch",
+      "seedHash": "c7d7b674f37972c144c1ab51ca023d6cd3d31998e9c39e77dc5d1d2a5b0186e1",
+      "selected": [
+        {
+          "id": "7a0901f1-9f30-4a9a-b7f1-8f5d35c05c65",
+          "guidanceHash": "37cb24e7dcea5f06fc0bf95667e1525f12e577fa6f62365c98e9fc5650f5ad8e"
+        }
+      ],
+      "provenance": [
+        {
+          "id": "7a0901f1-9f30-4a9a-b7f1-8f5d35c05c65",
+          "observationId": "b1b862eb-58c4-4adf-8d85-d01520264217",
+          "patternId": "fp1_438014e0ad0242b61f0244db5350f8638f3421f870f2cfe5e83c14d2800a2ea4",
+          "generation": 1,
+          "patternOccurrence": 1,
+          "errorCode": "BATCH_LIMIT",
+          "verifier": "deterministic-safety-v1",
+          "guidanceHash": "37cb24e7dcea5f06fc0bf95667e1525f12e577fa6f62365c98e9fc5650f5ad8e"
+        }
+      ]
+    }
+  ],
+  "scheduleSeed": 17,
+  "primary": "Unchanged exact-state grade(task, state), AND normal termination within budgets. Goal reached followed by budget exhaustion remains unsuccessful.",
+  "costs": [
+    "requests",
+    "tool calls",
+    "repeated identical invalid calls",
+    "reserved input admission units (not tokens)",
+    "reported input including cache tokens",
+    "reported output tokens",
+    "child elapsed milliseconds"
+  ],
+  "integrity": "Same accepted journal, initial state, protocol, model and first adapter/wire request excluding only promoted guidance; each arm has a fresh process and Session. Only treatment is promoted with public commands.",
+  "stopping": "Zero retries and no replacement. Six requests, ten tool operations and 90 seconds per arm; shared ledger and 30-second request deadline apply. Stop after two consecutive infrastructure-invalid runs. Retain every planned run, including failures, timeouts, invalid and not-run. No strategy changes or retests in this version.",
+  "analysis": "Six descriptive pairs; report both-success, treatment-only, baseline-only, both-failed and invalid counts, success-rate and cost deltas. No significance, equivalence or generalized effectiveness claim.",
+  "runs": [
+    {
+      "taskId": "heldout-batch-2",
+      "arm": "baseline",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-batch-2:baseline",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-batch-2",
+      "arm": "treatment",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-batch-2:treatment",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-precondition-1",
+      "arm": "treatment",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-precondition-1:treatment",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-precondition-1",
+      "arm": "baseline",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-precondition-1:baseline",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-precondition-2",
+      "arm": "baseline",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-precondition-2:baseline",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-precondition-2",
+      "arm": "treatment",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-precondition-2:treatment",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-batch-1",
+      "arm": "treatment",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-batch-1:treatment",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-batch-1",
+      "arm": "baseline",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-batch-1:baseline",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-format-1",
+      "arm": "baseline",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-format-1:baseline",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-format-1",
+      "arm": "treatment",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-format-1:treatment",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-format-2",
+      "arm": "treatment",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-format-2:treatment",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    },
+    {
+      "taskId": "heldout-format-2",
+      "arm": "baseline",
+      "id": "recovery-protocol-v2:heldout-v1:heldout-format-2:baseline",
+      "stage": "evaluation",
+      "requestLimit": 6,
+      "toolLimit": 10,
+      "outputCap": 1024
+    }
+  ]
+}
