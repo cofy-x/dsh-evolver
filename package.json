@@ -2,7 +2,11 @@
   "name": "dsh-evolver",
   "description": "Auditable, verifier-gated self-evolution for DeepSeek Harness.",
   "version": "0.1.0-alpha.0",
-  "private": true,
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "alpha"
+  },
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "engines": {
@@ -18,7 +22,8 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.vitest.json --pretty false",
     "check:compatibility": "node scripts/check-compatibility.mjs",
-    "test": "pnpm run check:compatibility && vitest run && node --test scripts/compatibility.test.mjs scripts/runtime-e2e/budget.test.mjs scripts/benchmark/benchmark.test.mjs scripts/benchmark/experiment.test.mjs",
+    "test:package": "pnpm run build && node scripts/check-package.mjs",
+    "test": "pnpm run check:compatibility && vitest run && node --test scripts/check-release.test.mjs scripts/compatibility.test.mjs scripts/runtime-e2e/budget.test.mjs scripts/benchmark/benchmark.test.mjs scripts/benchmark/experiment.test.mjs",
     "test:experience": "pnpm run build && node scripts/benchmark/experience-check.mjs && node scripts/benchmark/experience-loop-check.mjs",
     "test:runtime": "pnpm run build && node scripts/runtime-e2e.mjs",
     "test:deepseek-offline": "pnpm run build && node scripts/runtime-e2e.mjs --deepseek-dry-run && node scripts/runtime-e2e/faults.mjs",

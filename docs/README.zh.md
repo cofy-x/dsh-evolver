@@ -8,6 +8,7 @@
 | :--------------------------------- | :--------------------------------------- |
 | 如何工作，扩展时必须保持什么？     | [架构](architecture.zh.md)               |
 | 应执行哪些检查，需要哪些前置条件？ | [验证指南](runtime-validation.zh.md)     |
+| 如何验证 npm 归档并安全发布？      | [npm 发布](releasing.zh.md)              |
 | 如何安全验证真实 DeepSeek 传输？   | [DeepSeek smoke](deepseek-smoke.zh.md)   |
 | 如何衡量任务成功并解释配对比较？   | [配对 benchmark](paired-benchmark.zh.md) |
 

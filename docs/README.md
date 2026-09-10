@@ -8,6 +8,7 @@ Read the project README first, then only the page relevant to the task.
 | :------------------------------------------------------- | :-------------------------------------- |
 | How does it work, and what must an extension preserve?   | [Architecture](architecture.md)         |
 | Which checks should I run, with which prerequisites?     | [Verification](runtime-validation.md)   |
+| How do I verify an npm archive and release safely?       | [npm release](releasing.md)             |
 | How do I validate the real DeepSeek transport safely?    | [DeepSeek smoke](deepseek-smoke.md)     |
 | How do I measure task success and interpret comparisons? | [Paired benchmark](paired-benchmark.md) |
 

@@ -65,7 +65,7 @@ dsh --profile web --dump-config
 
 ## 安装
 
-开发和 Git 安装需要 Node.js 24 或更新版本以及 pnpm 11。DSH Evolver 尚未发布到 npm。
+开发和 Git 安装需要 Node.js 24 或更新版本以及 pnpm 11。npm 候选使用 `alpha` 渠道；归档验证与发布流程见 [npm 发布](docs/releasing.zh.md)。首个 registry 版本验证完成前，使用上面的 Git 安装方式。可用后通过 `dsh plugin --profile web add dsh-evolver@alpha` 安装并重启 profile。发布归档包含已构建的 JavaScript 和类型声明，使用者不需要构建 Evolver。宿主兼容范围声明在 `package.json` 中。
 
 ```sh
 git clone https://github.com/cofy-x/dsh-evolver.git

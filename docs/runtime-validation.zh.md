@@ -17,13 +17,14 @@ git diff --check
 git diff --cached --check
 ```
 
-| 变更边界                          | 追加命令                          | 能证明什么                                      |
-| :-------------------------------- | :-------------------------------- | :---------------------------------------------- |
-| Loader、命令、Session、注入、销毁 | `pnpm run test:runtime`           | 随附 Headless 生命周期/恢复和独立 Web 启动      |
-| Smoke 适配器、wire 预算、传输     | `pnpm run test:deepseek-offline`  | 真实 DeepSeek 适配器的本地 SSE、429 和超时处理  |
-| Benchmark 评分、调度、完整性      | `pnpm run test:benchmark`         | 成功、失败、污染和超时的正确归类                |
-| Benchmark 适配器和共享 wire 账本  | `pnpm run test:benchmark-adapter` | 真实适配器 fixture、传输故障和付费 CLI 拒绝边界 |
-| 配对测量输出                      | `pnpm run benchmark:offline`      | 脚本 baseline/treatment 报告和 guidance 开销    |
+| 变更边界                          | 追加命令                          | 能证明什么                                                                            |
+| :-------------------------------- | :-------------------------------- | :------------------------------------------------------------------------------------ |
+| Loader、命令、Session、注入、销毁 | `pnpm run test:runtime`           | 随附 Headless 生命周期/恢复和独立 Web 启动                                            |
+| Smoke 适配器、wire 预算、传输     | `pnpm run test:deepseek-offline`  | 真实 DeepSeek 适配器的本地 SSE、429 和超时处理                                        |
+| Benchmark 评分、调度、完整性      | `pnpm run test:benchmark`         | 成功、失败、污染和超时的正确归类                                                      |
+| Benchmark 适配器和共享 wire 账本  | `pnpm run test:benchmark-adapter` | 真实适配器 fixture、传输故障和付费 CLI 拒绝边界                                       |
+| 配对测量输出                      | `pnpm run benchmark:offline`      | 脚本 baseline/treatment 报告和 guidance 开销                                          |
+| 包内容、exports、npm 分发         | `pnpm run test:package`           | 真实归档安装、ESM 和消费端类型；追加 `--harness=../deepseek-harness` 验证随附 profile |
 
 持久化修改还需覆盖重启、损坏/旧日志重放、状态转换、幂等性和相关准入竞争。模型可见变更需断言规范 Session 和实际请求。脚本 fixture 验证接线和评分；任务效果结论需要单独设计实验。
 

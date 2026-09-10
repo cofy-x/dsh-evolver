@@ -65,7 +65,7 @@ Baseline/treatment tool failure rates inform human rollback decisions. The curre
 
 ## Installation
 
-Development and Git installation require Node.js 24 or newer and pnpm 11. DSH Evolver is not published to npm.
+Development and Git installation require Node.js 24 or newer and pnpm 11. npm candidates use the `alpha` channel; consult [npm release](docs/releasing.md) for archive verification and publication. Until the first registry release is verified, use the Git installation above. Once available, install with `dsh plugin --profile web add dsh-evolver@alpha` and restart the profile. Published archives include built JavaScript and declarations; consumers do not need to build Evolver. Host compatibility is declared in `package.json`.
 
 ```sh
 git clone https://github.com/cofy-x/dsh-evolver.git

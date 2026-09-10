@@ -85,7 +85,9 @@ const { boot, loadProfile, composeEntries } = await import('@deepseek-ai/dsh-app
 const { LlmAdapter, createUserMessage } = await import('@deepseek-ai/dsh-llm')
 const { defineTool } = await import('@deepseek-ai/dsh-tools')
 const { SessionId } = await import('@deepseek-ai/dsh-session')
-const evolverUrl = new URL('../../lib/index.js', import.meta.url)
+const evolverUrl = process.env.EVOLVER_PACKAGE_DIR
+  ? pathToFileURL(join(process.env.EVOLVER_PACKAGE_DIR, 'lib/index.js'))
+  : new URL('../../lib/index.js', import.meta.url)
 const { EvolutionStore } = await import(evolverUrl.href)
 const anchor = join(harness, 'apps/cli/package.json')
 const profile = loadProfile('evolver-e2e', profileName, anchor, process.env.DSH_HOME, {

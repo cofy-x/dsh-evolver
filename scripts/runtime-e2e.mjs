@@ -10,7 +10,7 @@ import { LIMITS } from './runtime-e2e/budget.mjs'
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/runtime-e2e.mjs [harness-checkout] [--deepseek-dry-run | --deepseek-live --allow-paid --model=ID]\nDefault: offline shipped profiles. Dry-run: real DeepSeek adapter, local SSE only. Live requires explicit paid authorization and DEEPSEEK_API_KEY; reports no raw child output. Smoke options: --timeout-ms=1..120000 (lower only); dry-run only: --fault=rate-limit|hang. Input admission uses UTF-8 bytes plus framing allowance, not an authoritative tokenizer. Fixed limits: ' +
+    'Usage: node scripts/runtime-e2e.mjs [harness-checkout] [--deepseek-dry-run | --deepseek-live --allow-paid --model=ID]\nDefault: offline shipped profiles; --package-dir=PATH tests an installed archive instead of the local build (offline only). Dry-run: real DeepSeek adapter, local SSE only. Live requires explicit paid authorization and DEEPSEEK_API_KEY; reports no raw child output. Smoke options: --timeout-ms=1..120000 (lower only); dry-run only: --fault=rate-limit|hang. Input admission uses UTF-8 bytes plus framing allowance, not an authoritative tokenizer. Fixed limits: ' +
       JSON.stringify(LIMITS),
   )
   process.exit(0)
@@ -46,13 +46,18 @@ assert.ok(
     (arg) =>
       !arg.startsWith('--') ||
       known.has(arg) ||
-      ['--model=', '--fault=', '--timeout-ms='].some((prefix) => arg.startsWith(prefix)),
+      ['--model=', '--fault=', '--timeout-ms=', '--package-dir='].some((prefix) =>
+        arg.startsWith(prefix),
+      ),
   ),
   'unknown option',
 )
 const paths = args.filter((arg) => !arg.startsWith('--'))
 assert.ok(paths.length <= 1, 'one harness checkout expected')
 const harness = resolve(paths[0] ?? '../deepseek-harness')
+const packageDir = args.find((arg) => arg.startsWith('--package-dir='))?.slice(14)
+assert.notEqual(packageDir, '', 'package-dir must not be empty')
+assert.ok(!packageDir || (!live && !dry), 'package-dir is for offline package acceptance only')
 // This is the only real credential read; all CLI validation precedes it.
 const credential = live ? process.env.DEEPSEEK_API_KEY : undefined
 assert.ok(!live || credential, 'DEEPSEEK_API_KEY must be supplied by the caller')
@@ -91,6 +96,7 @@ for (const profile of live || dry ? ['headless'] : ['headless', 'web']) {
               XDG_CONFIG_HOME: join(root, 'config'),
               XDG_CACHE_HOME: join(root, 'cache'),
               DSH_TELEMETRY_DISABLED: '1',
+              ...(packageDir ? { EVOLVER_PACKAGE_DIR: resolve(packageDir) } : {}),
               ...(live
                 ? { DEEPSEEK_API_KEY: credential, EVOLVER_LIVE_AUTHORIZED: 'yes' }
                 : dry

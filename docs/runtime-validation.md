@@ -17,13 +17,14 @@ git diff --check
 git diff --cached --check
 ```
 
-| Changed boundary                                | Additional command                | What it establishes                                             |
-| :---------------------------------------------- | :-------------------------------- | :-------------------------------------------------------------- |
-| Loader, commands, Sessions, injection, disposal | `pnpm run test:runtime`           | Shipped Headless lifecycle/recovery and separate Web startup    |
-| Smoke adapter, wire budgets, transport          | `pnpm run test:deepseek-offline`  | Real DeepSeek adapter with local SSE, 429 and timeout handling  |
-| Benchmark grading, scheduling, integrity        | `pnpm run test:benchmark`         | Correct scoring of success, failure, contamination and timeouts |
-| Benchmark adapter and shared wire ledger        | `pnpm run test:benchmark-adapter` | Real-adapter fixture, transport faults and paid CLI rejection   |
-| Paired measurement output                       | `pnpm run benchmark:offline`      | Scripted baseline/treatment report and guidance overhead        |
+| Changed boundary                                | Additional command                | What it establishes                                                                                                   |
+| :---------------------------------------------- | :-------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
+| Loader, commands, Sessions, injection, disposal | `pnpm run test:runtime`           | Shipped Headless lifecycle/recovery and separate Web startup                                                          |
+| Smoke adapter, wire budgets, transport          | `pnpm run test:deepseek-offline`  | Real DeepSeek adapter with local SSE, 429 and timeout handling                                                        |
+| Benchmark grading, scheduling, integrity        | `pnpm run test:benchmark`         | Correct scoring of success, failure, contamination and timeouts                                                       |
+| Benchmark adapter and shared wire ledger        | `pnpm run test:benchmark-adapter` | Real-adapter fixture, transport faults and paid CLI rejection                                                         |
+| Paired measurement output                       | `pnpm run benchmark:offline`      | Scripted baseline/treatment report and guidance overhead                                                              |
+| Package contents, exports, npm distribution     | `pnpm run test:package`           | Real archive installation, ESM and consumer types; add `--harness=../deepseek-harness` for shipped-profile acceptance |
 
 Persistence changes also require restart, corrupt/legacy replay, transitions, idempotency, and relevant admission-race tests. Model-visible changes require canonical Session and actual-request assertions. Scripted fixtures establish wiring and grading; task-effectiveness claims need a separately designed experiment.
 

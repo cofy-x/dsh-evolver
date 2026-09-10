@@ -31,6 +31,7 @@ jobs:
       - run: pnpm test
       - run: pnpm run build
       - run: pnpm pack --dry-run
+      - run: node scripts/check-package.mjs
       - run: node --input-type=module -e "import('./lib/index.js').then((m) => { if (m.name !== 'dsh-evolver' || typeof m.EvolutionStore !== 'function') process.exit(1) })"
       - run: test -z "$(git status --porcelain)"
 
