@@ -15,7 +15,7 @@ dsh plugin --profile web add dsh-evolver@alpha
 dsh --profile web --dump-config
 ```
 
-发布包包含构建后的 JavaScript 和类型声明。如需精确候选，将 `alpha` 替换为已发布版本。[package.json](package.json) 声明开发基线与宿主兼容范围；registry 渠道可能仍指向较早版本。也可通过 `dsh plugin --profile web add github:cofy-x/dsh-evolver` 从 Git 安装，但需要开发工具链。
+发布包包含构建后的 JavaScript 和类型声明。受支持的模块入口只有 `dsh-evolver`、`dsh-evolver/domain` 和 `dsh-evolver/store`；源码模块属于内部实现，不随包发布。如需精确候选，将 `alpha` 替换为已发布版本。[package.json](package.json) 声明开发基线与宿主兼容范围；registry 渠道可能仍指向较早版本。也可通过 `dsh plugin --profile web add github:cofy-x/dsh-evolver` 从 Git 安装，但需要开发工具链。
 
 模型请求的工具失败后，在支持命令的 DSH 客户端中执行：
 

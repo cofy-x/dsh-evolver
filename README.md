@@ -15,7 +15,7 @@ dsh plugin --profile web add dsh-evolver@alpha
 dsh --profile web --dump-config
 ```
 
-The archive includes built JavaScript and declarations. Replace `alpha` with a published version for an exact candidate. [package.json](package.json) declares the development baseline and host compatibility; the registry channel may still point to an earlier release. Git installation remains available as `dsh plugin --profile web add github:cofy-x/dsh-evolver` and requires the development toolchain.
+The archive includes built JavaScript and declarations. Its supported module entry points are `dsh-evolver`, `dsh-evolver/domain` and `dsh-evolver/store`; source modules are internal and are not shipped. Replace `alpha` with a published version for an exact candidate. [package.json](package.json) declares the development baseline and host compatibility; the registry channel may still point to an earlier release. Git installation remains available as `dsh plugin --profile web add github:cofy-x/dsh-evolver` and requires the development toolchain.
 
 After a model-requested tool fails, use a command-capable DSH client:
 

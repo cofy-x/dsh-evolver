@@ -24,6 +24,7 @@ assert.equal(pkg.name, 'dsh-evolver')
 assert.notEqual(pkg.private, true)
 assert.equal(pkg.publishConfig.tag, 'alpha')
 assert.match(pkg.version, /^\d+\.\d+\.\d+-alpha\.\d+$/)
+assert.deepEqual(Object.keys(pkg.exports), ['.', './domain', './store', './package.json'])
 const output = join(root, '.cache', 'release')
 mkdirSync(output, { recursive: true })
 const [packed] = JSON.parse(
@@ -46,7 +47,7 @@ for (const name of [
   assert.ok(files.has(name), `missing package file: ${name}`)
 for (const name of files)
   assert.ok(
-    !/(^|\/)(node_modules|\.cache|\.git|\.env)(\/|$)/.test(name),
+    !/(^|\/)(node_modules|src|\.cache|\.git|\.env)(\/|$)/.test(name),
     `unexpected package file: ${name}`,
   )
 const tarball = join(output, packed.filename)
@@ -96,6 +97,10 @@ try {
   const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'))
   assert.equal(manifest.version, pkg.version)
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
+  assert.deepEqual(Object.keys(manifest.exports), ['.', './domain', './store', './package.json'])
+  await assert.rejects(import('dsh-evolver/src/config.js'), {
+    code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+  })
   assert.equal(
     readFileSync(join(installed, 'cordis.patch.yml'), 'utf8'),
     readFileSync(join(root, 'cordis.patch.yml'), 'utf8'),

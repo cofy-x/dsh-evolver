@@ -50,12 +50,10 @@
       "types": "./lib/types/store.d.ts",
       "default": "./lib/store.js"
     },
-    "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
-    "src",
     "cordis.patch.yml",
     "docs/**/*.md",
     "README.md",
